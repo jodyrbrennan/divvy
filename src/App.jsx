@@ -24,6 +24,7 @@ export default function App() {
   const [editingTask, setEditingTask] = useState(null);
   const [requestedView, setRequestedView] = useState(null);
   const [pendingPreview, setPendingPreview] = useState(null);
+  const [pendingUserId, setPendingUserId] = useState(null);
 
   useEffect(() => {
     loadData().then((data) => {
@@ -33,24 +34,60 @@ export default function App() {
   }, []);
 
   const handleHouseholdCreated = (household) => { setPendingHousehold(household); setScreen("profileSetup"); };
-  const handleJoined = (household) => { setPendingHousehold(household); setScreen("profileSetup"); };
+
+  const handleJoined = (result) => {
+    setPendingHousehold(result.household);
+    setPendingUserId(result.pendingUser?.id || null);
+    setScreen("profileSetup");
+  };
 
   const handleProfileComplete = async (profile) => {
-    const user = {
-      id: uid(), name: profile.name, type: profile.type, pointBalance: 0,
-      relationships: {}, relationshipTags: {},
-      communicationProfile: {
-        tone: profile.tone, sensitivity: profile.sensitivity, forgetfulness: profile.forgetfulness,
-        undoneFeelings: profile.undoneFeelings, askStyle: profile.askStyle,
-        notifFrequency: profile.notifFrequency, recognitionPref: profile.recognitionPref,
-      },
-    };
-    const newData = {
-      ...appData, household: pendingHousehold || appData.household,
-      users: [...(appData?.users || []), user], currentUserId: user.id,
-    };
+    let newData;
+
+    if (pendingUserId) {
+      // Taking over a pending user slot
+      const updatedUsers = appData.users.map((u) =>
+        u.id === pendingUserId
+          ? {
+              ...u,
+              name: profile.name,
+              type: "full",
+              status: "active",
+              inviteCode: null,
+              communicationProfile: {
+                tone: profile.tone, sensitivity: profile.sensitivity, forgetfulness: profile.forgetfulness,
+                undoneFeelings: profile.undoneFeelings, askStyle: profile.askStyle,
+                notifFrequency: profile.notifFrequency, recognitionPref: profile.recognitionPref,
+              },
+            }
+          : u
+      );
+      newData = {
+        ...appData,
+        household: pendingHousehold || appData.household,
+        users: updatedUsers,
+        currentUserId: pendingUserId,
+      };
+    } else {
+      // Brand new user joining the household
+      const user = {
+        id: uid(), name: profile.name, type: profile.type, pointBalance: 0,
+        relationships: {}, relationshipTags: {},
+        communicationProfile: {
+          tone: profile.tone, sensitivity: profile.sensitivity, forgetfulness: profile.forgetfulness,
+          undoneFeelings: profile.undoneFeelings, askStyle: profile.askStyle,
+          notifFrequency: profile.notifFrequency, recognitionPref: profile.recognitionPref,
+        },
+      };
+      newData = {
+        ...appData, household: pendingHousehold || appData.household,
+        users: [...(appData?.users || []), user], currentUserId: user.id,
+      };
+    }
+
     setAppData(newData);
     await saveData(newData);
+    setPendingUserId(null);
     setScreen("dashboard");
   };
 

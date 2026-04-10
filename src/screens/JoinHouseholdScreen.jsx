@@ -11,11 +11,23 @@ export default function JoinHouseholdScreen({ onJoined, onBack, appData }) {
   const handleJoin = () => {
     const c = code.trim().toUpperCase();
     if (!c) return;
+
+    // Check if code matches the household invite code
     if (appData.household && appData.household.inviteCode === c) {
-      onJoined(appData.household);
-    } else {
-      setError("No household found with that code. Double-check and try again.");
+      onJoined({ household: appData.household, pendingUser: null });
+      return;
     }
+
+    // Check if code matches a pending member's invite code
+    const pendingUser = appData.users.find(
+      (u) => u.status === "pending" && u.inviteCode && u.inviteCode === c
+    );
+    if (pendingUser && appData.household) {
+      onJoined({ household: appData.household, pendingUser });
+      return;
+    }
+
+    setError("No household found with that code. Double-check and try again.");
   };
   return (
     <PageShell narrow>
