@@ -15,8 +15,8 @@ export const defaultData = () => ({
 
 export async function loadData() {
   try {
-    const result = await window.storage.get(STORAGE_KEY);
-    return result ? JSON.parse(result.value) : defaultData();
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : defaultData();
   } catch {
     return defaultData();
   }
@@ -24,7 +24,7 @@ export async function loadData() {
 
 export async function saveData(data) {
   try {
-    await window.storage.set(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch (e) {
     console.error("Save failed:", e);
   }
