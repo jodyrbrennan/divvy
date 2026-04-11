@@ -48,6 +48,7 @@ export function isTaskDueToday(task) {
   const today = now.getDay();
   const dateNum = now.getDate();
 
+  if (task.taskType === "unscheduled") return false;
   // Check task type constraints
   if (task.taskType === "one-time" && task.lastCompleted) return false;
   if (task.taskType === "temporary" && task.tempConfig) {

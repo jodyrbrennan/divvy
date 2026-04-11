@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { C, font } from "../constants/colors";
-import { useToast } from "./Toast";
 import Logo from "./Logo";
 
-export default function TopNav({ userName, unreadCount, onBellClick }) {
+export default function TopNav({ userName, unreadCount, onBellClick, onSettings, onSignOut }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const showToast = useToast();
   return (
     <>
       <div style={{
@@ -75,24 +73,32 @@ export default function TopNav({ userName, unreadCount, onBellClick }) {
             padding: 8, minWidth: 180,
             animation: "fadeUp 0.15s ease both",
           }}>
-            {[
-              { label: "Settings", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" },
-              { label: "Sign out", icon: "M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" },
-            ].map((item) => (
-              <button key={item.label} onClick={() => { setMenuOpen(false); showToast(`${item.label} — coming soon`); }} style={{
-                all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
-                padding: "12px 14px", borderRadius: 10, width: "100%",
-                transition: "background 0.15s", fontSize: 14, fontWeight: 500, color: C.dark,
-                fontFamily: font,
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.background = C.ice}
-              onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.steel} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d={item.icon} />
-                </svg>
-                {item.label}
-              </button>
-            ))}
+            <button onClick={() => { setMenuOpen(false); onSettings?.(); }} style={{
+              all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+              padding: "12px 14px", borderRadius: 10, width: "100%",
+              transition: "background 0.15s", fontSize: 14, fontWeight: 500, color: C.dark,
+              fontFamily: font,
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = C.ice}
+            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.steel} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+              </svg>
+              Settings
+            </button>
+            <button onClick={() => { setMenuOpen(false); onSignOut?.(); }} style={{
+              all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+              padding: "12px 14px", borderRadius: 10, width: "100%",
+              transition: "background 0.15s", fontSize: 14, fontWeight: 500, color: C.danger,
+              fontFamily: font,
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(192,57,43,0.06)"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.danger} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+              </svg>
+              Sign out
+            </button>
           </div>
         </>
       )}

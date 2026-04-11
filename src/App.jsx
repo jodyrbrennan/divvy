@@ -217,16 +217,27 @@ export default function App() {
   return (
     <ToastProvider>
       <GlobalStyles />
-      {loggedIn && <TopNav userName={currentUserName} unreadCount={myUnreadCount} onBellClick={async () => {
-        const updated = (appData.notifications || []).map((n) =>
-          n.targetUserId === appData.currentUserId ? { ...n, read: true } : n
-        );
-        const newData = { ...appData, notifications: updated };
-        setAppData(newData);
-        await saveData(newData);
-        setScreen("dashboard");
-        setRequestedView("notifications");
-      }} />}
+      {loggedIn && <TopNav userName={currentUserName} unreadCount={myUnreadCount}
+        onBellClick={async () => {
+          const updated = (appData.notifications || []).map((n) =>
+            n.targetUserId === appData.currentUserId ? { ...n, read: true } : n
+          );
+          const newData = { ...appData, notifications: updated };
+          setAppData(newData);
+          await saveData(newData);
+          setScreen("dashboard");
+          setRequestedView("notifications");
+        }}
+        onSettings={() => {
+          setScreen("dashboard");
+          setRequestedView("settings");
+        }}
+        onSignOut={() => {
+          localStorage.removeItem('divvy-current-user');
+          setAppData({ ...appData, currentUserId: null });
+          setScreen("welcome");
+        }}
+      />}
       {screen === "welcome" && <WelcomeScreen onCreateNew={() => setScreen("createHousehold")} onJoin={() => setScreen("joinHousehold")} />}
       {screen === "createHousehold" && <CreateHouseholdScreen onCreated={handleHouseholdCreated} onBack={() => setScreen("welcome")} />}
       {screen === "joinHousehold" && <JoinHouseholdScreen appData={appData} onJoined={handleJoined} onBack={() => setScreen("welcome")} />}

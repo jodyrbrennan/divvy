@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { C, font, fontDisplay } from "../constants/colors";
+import { C, font, fontDisplay, getFreqColor } from "../constants/colors";
 import { btnBase, btnPrimary, btnSecondary, btnGhost, inputStyle, labelStyle } from "../constants/styles";
 import { uid, saveData, defaultData } from "../utils/storage";
 import { rewriteForUser } from "../utils/communication";
 import { RECIPROCAL, propagateRelationships } from "../utils/relationships";
 import { getScheduleLabel, isTaskDueToday } from "../utils/taskHelpers";
+import { isTaskActiveOnDate } from "../utils/calendarHelpers";
 import { useToast } from "../components/Toast";
 import PageShell from "../components/PageShell";
 import Card from "../components/Card";
@@ -23,6 +24,13 @@ export default function Dashboard({ appData, setAppData, onAddMember, onCreateTa
   const [view, setView] = useState("hub");
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
   const [completionDialogTasks, setCompletionDialogTasks] = useState(null);
+  const [showUnscheduledForm, setShowUnscheduledForm] = useState(false);
+  const [unschedName, setUnschedName] = useState("");
+  const [unschedDesc, setUnschedDesc] = useState("");
+  const [unschedPoints, setUnschedPoints] = useState(10);
+  const [editingName, setEditingName] = useState(false);
+  const [tempName, setTempName] = useState("");
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
 
   // Handle external view requests (e.g. bell click from TopNav)
   useEffect(() => {
@@ -150,23 +158,43 @@ export default function Dashboard({ appData, setAppData, onAddMember, onCreateTa
     const task = appData.tasks.find((t) => t.id === taskId);
     if (!task) return;
     const userId = completerId || appData.currentUserId;
-    const completion = { id: uid(), taskId, userId, timestamp: new Date().toISOString(), pointsEarned: task.points || 0 };
-    const updatedTasks = appData.tasks.map((t) => t.id === taskId ? { ...t, lastCompleted: completion.timestamp, status: "completed" } : t);
+    const now = new Date().toISOString();
+    const completion = { id: uid(), taskId, userId, timestamp: now, pointsEarned: task.points || 0 };
+    const updatedTasks = appData.tasks.map((t) => t.id === taskId ? { ...t, lastCompleted: now, status: "completed" } : t);
     const updatedUsers = appData.users.map((u) => u.id === userId ? { ...u, pointBalance: (u.pointBalance || 0) + (task.points || 0) } : u);
-    const newData = { ...appData, tasks: updatedTasks, users: updatedUsers, completions: [...appData.completions, completion] };
-    setAppData(newData); await saveData(newData);
 
     const completerName = appData.users.find((u) => u.id === userId)?.name || "Someone";
     const assignees = task.assignedTo || [];
     const completedForOthers = assignees.filter((id) => id !== userId);
 
+    const newNotifications = [];
     if (task.createdBy && task.createdBy !== userId) {
-      sendSystemNotification(task.createdBy, "completion", `${completerName} completed the task: "${task.name}"`, { taskId, completedBy: userId });
+      newNotifications.push({
+        id: uid(), type: "completion", targetUserId: task.createdBy, fromUserId: "system",
+        rawMessage: `${completerName} completed the task: "${task.name}"`,
+        message: `${completerName} completed the task: "${task.name}"`,
+        read: false, timestamp: now, taskId, completedBy: userId,
+      });
+    }
+    for (const otherId of completedForOthers) {
+      if (otherId === task.createdBy) continue;
+      newNotifications.push({
+        id: uid(), type: "completion", targetUserId: otherId, fromUserId: "system",
+        rawMessage: `${completerName} completed your task: "${task.name}"`,
+        message: `${completerName} completed your task: "${task.name}"`,
+        read: false, timestamp: now, taskId, completedBy: userId,
+      });
     }
 
-    for (const uid2 of completedForOthers) {
-      sendSystemNotification(uid2, "completion", `${completerName} completed your task: "${task.name}"`, { taskId, completedBy: userId });
-    }
+    const newData = {
+      ...appData,
+      tasks: updatedTasks,
+      users: updatedUsers,
+      completions: [...appData.completions, completion],
+      notifications: [...(appData.notifications || []), ...newNotifications],
+    };
+    setAppData(newData);
+    await saveData(newData);
 
     if (userId !== appData.currentUserId) {
       showToast(`Marked "${task.name}" complete for ${completerName}`);
@@ -250,6 +278,84 @@ export default function Dashboard({ appData, setAppData, onAddMember, onCreateTa
     setAppData(newData); await saveData(newData);
   };
 
+  const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const userTimezone = currentUser?.timezone || detectedTimezone;
+
+  const handleUpdateName = async (newName) => {
+    if (!newName.trim()) return;
+    const updatedUsers = appData.users.map((u) =>
+      u.id === appData.currentUserId ? { ...u, name: newName.trim() } : u
+    );
+    const newData = { ...appData, users: updatedUsers };
+    setAppData(newData);
+    await saveData(newData);
+    setEditingName(false);
+    showToast("Name updated");
+  };
+
+  const handleUpdateTimezone = async (tz) => {
+    const updatedUsers = appData.users.map((u) =>
+      u.id === appData.currentUserId ? { ...u, timezone: tz } : u
+    );
+    const newData = { ...appData, users: updatedUsers };
+    setAppData(newData);
+    await saveData(newData);
+    showToast(`Time zone set to ${tz}`);
+  };
+
+  const handleUpdateCommPref = async (key, value) => {
+    const updatedUsers = appData.users.map((u) =>
+      u.id === appData.currentUserId ? { ...u, communicationProfile: { ...(u.communicationProfile || {}), [key]: value } } : u
+    );
+    const newData = { ...appData, users: updatedUsers };
+    setAppData(newData);
+    await saveData(newData);
+    showToast("Preference updated");
+  };
+  
+  const handleUnscheduledSubmit = async () => {
+    if (!unschedName.trim()) return;
+    const now = new Date().toISOString();
+    const taskId = uid();
+    const newTask = {
+      id: taskId, name: unschedName.trim(), description: unschedDesc.trim(),
+      schedule: "none", scheduleConfig: { frequency: "none" },
+      taskType: "unscheduled", tempConfig: null,
+      dueConfig: { type: "none" },
+      assignedTo: [appData.currentUserId], assignMode: "me",
+      rotation: null, points: Math.max(0, parseInt(unschedPoints) || 0),
+      status: "completed", lastCompleted: now,
+      createdAt: now, createdBy: appData.currentUserId,
+    };
+    const completion = { id: uid(), taskId, userId: appData.currentUserId, timestamp: now, pointsEarned: newTask.points };
+    const updatedUsers = appData.users.map((u) =>
+      u.id === appData.currentUserId ? { ...u, pointBalance: (u.pointBalance || 0) + newTask.points } : u
+    );
+    const completerName = currentUser?.name || "Someone";
+    const newNotifications = [];
+    for (const u of appData.users) {
+      if (u.id === appData.currentUserId || u.status === "pending") continue;
+      newNotifications.push({
+        id: uid(), type: "completion", targetUserId: u.id, fromUserId: "system",
+        rawMessage: `${completerName} completed an unscheduled task: "${newTask.name}"`,
+        message: `${completerName} completed an unscheduled task: "${newTask.name}"`,
+        read: false, timestamp: now, taskId, completedBy: appData.currentUserId,
+      });
+    }
+    const newData = {
+      ...appData,
+      tasks: [...appData.tasks, newTask],
+      completions: [...appData.completions, completion],
+      users: updatedUsers,
+      notifications: [...(appData.notifications || []), ...newNotifications],
+    };
+    setAppData(newData);
+    await saveData(newData);
+    setUnschedName(""); setUnschedDesc(""); setUnschedPoints(10);
+    setShowUnscheduledForm(false);
+    showToast(`"${newTask.name}" logged — +${newTask.points} points`);
+  };
+  
   const handleDeleteTask = async (taskId) => {
     const newData = { ...appData, tasks: appData.tasks.filter((t) => t.id !== taskId), completions: appData.completions.filter((c) => c.taskId !== taskId) };
     setAppData(newData); await saveData(newData);
@@ -823,7 +929,10 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
             </button>
           )}
           <div style={{ flex: 1, minWidth: 0, opacity: done ? 0.5 : 1 }} onClick={() => setShowActions(!showActions)}>
-            <p style={{ fontWeight: 600, fontSize: compact ? 14 : 15, textDecoration: done ? "line-through" : "none", color: done ? C.steel : C.dark }}>{task.name}</p>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: getFreqColor(task), flexShrink: 0, opacity: done ? 0.4 : 1 }} />
+              <p style={{ fontWeight: 600, fontSize: compact ? 14 : 15, textDecoration: done ? "line-through" : "none", color: done ? C.steel : C.dark }}>{task.name}</p>
+            </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
               <span style={{ fontSize: 11, color: C.steel }}>{assignees}</span>
               {task.schedule && task.schedule !== "once" && (
@@ -2291,13 +2400,22 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
         <Card delay={0.05}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <h3 style={{ fontFamily: fontDisplay, fontSize: 19, fontWeight: 600 }}>Tasks Due Today</h3>
-            <button onClick={onCreateTask} style={{
-              ...btnBase, padding: "8px 16px", fontSize: 13, borderRadius: 10,
-              background: C.gradientPrimary, color: C.white, boxShadow: "0 2px 10px rgba(41,53,60,0.2)",
-              display: "flex", alignItems: "center", gap: 6,
-            }}>
-              <PlusIcon size={16} /> Add task
-            </button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={onCreateTask} style={{
+                ...btnBase, padding: "8px 12px", fontSize: 12, borderRadius: 10,
+                background: C.gradientPrimary, color: C.white, boxShadow: "0 2px 10px rgba(41,53,60,0.2)",
+                display: "flex", alignItems: "center", gap: 5,
+              }}>
+                <PlusIcon size={14} /> Scheduled
+              </button>
+              <button onClick={() => setShowUnscheduledForm(true)} style={{
+                ...btnBase, padding: "8px 12px", fontSize: 12, borderRadius: 10,
+                background: C.ice, color: C.navy, border: `1.5px solid ${C.sky}`,
+                display: "flex", alignItems: "center", gap: 5,
+              }}>
+                <PlusIcon size={14} /> Unscheduled
+              </button>
+            </div>
           </div>
 
           {dueTasks.length === 0 ? (
@@ -2325,6 +2443,53 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
           onConfirm={handleBulkComplete}
           onCancel={() => { setCompletionDialogTasks(null); }}
         />
+      )}
+      {showUnscheduledForm && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 200,
+          background: "rgba(41,53,60,0.5)", backdropFilter: "blur(6px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20, animation: "fadeUp 0.2s ease both",
+        }}>
+          <div style={{
+            background: C.white, borderRadius: 20, padding: 28,
+            maxWidth: 420, width: "100%",
+            boxShadow: "0 16px 48px rgba(0,0,0,0.15)",
+          }}>
+            <h3 style={{ fontFamily: fontDisplay, fontSize: 20, fontWeight: 600, color: C.dark, marginBottom: 4 }}>Log a completed task</h3>
+            <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 20 }}>
+              Record something you already did. You'll earn points and your household will be notified.
+            </p>
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>What did you do?</label>
+              <input style={inputStyle} placeholder='e.g. "Called the plumber", "Replaced garage light"'
+                value={unschedName} onChange={(e) => setUnschedName(e.target.value)} autoFocus />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Details (optional)</label>
+              <textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical", fontFamily: font }}
+                placeholder="Any extra notes"
+                value={unschedDesc} onChange={(e) => setUnschedDesc(e.target.value)} />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelStyle}>Points earned</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
+                <button onClick={() => setUnschedPoints(Math.max(0, (parseInt(unschedPoints) || 0) - 5))}
+                  style={{ ...btnBase, padding: "8px 16px", background: C.ice, color: C.navy, fontSize: 18, borderRadius: 10 }}>&minus;</button>
+                <input style={{ ...inputStyle, width: 70, textAlign: "center", fontSize: 22, fontWeight: 700, padding: "8px" }}
+                  type="number" min="0" value={unschedPoints} onChange={(e) => setUnschedPoints(e.target.value)} />
+                <button onClick={() => setUnschedPoints((parseInt(unschedPoints) || 0) + 5)}
+                  style={{ ...btnBase, padding: "8px 16px", background: C.ice, color: C.navy, fontSize: 18, borderRadius: 10 }}>+</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { setShowUnscheduledForm(false); setUnschedName(""); setUnschedDesc(""); setUnschedPoints(10); }}
+                style={{ ...btnSecondary, flex: 1 }}>Cancel</button>
+              <button onClick={handleUnscheduledSubmit} disabled={!unschedName.trim()}
+                style={{ ...btnPrimary, flex: 2, opacity: unschedName.trim() ? 1 : 0.45 }}>Log task</button>
+            </div>
+          </div>
+        </div>
       )}
       </>
     );
@@ -2504,6 +2669,199 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
             <button onClick={() => setRecoStep(1)} style={{ ...btnGhost, width: "100%", marginTop: 4 }}>&larr; Previous</button>
           </Card>
         )}
+      </PageShell>
+    );
+  }
+
+// ════════════════════════════════════════════════════════════════
+  // SETTINGS VIEW
+  // ════════════════════════════════════════════════════════════════
+  if (view === "settings") {
+    const commProfile = currentUser?.communicationProfile || {};
+    const commOptions = {
+      tone: { label: "Preferred tone", options: [
+        { v: "casual", l: "Casual" }, { v: "direct", l: "Direct" }, { v: "gentle", l: "Gentle" }, { v: "humorous", l: "Humorous" },
+      ]},
+      sensitivity: { label: "Task sensitivity", options: [
+        { v: "low", l: "Low" }, { v: "medium", l: "Medium" }, { v: "high", l: "High" },
+      ]},
+      askStyle: { label: "Ask style", options: [
+        { v: "direct", l: "Direct request" }, { v: "suggestion", l: "Suggestion" }, { v: "question", l: "Question" },
+      ]},
+      forgetfulness: { label: "Forgetfulness", options: [
+        { v: "rarely", l: "Rarely" }, { v: "sometimes", l: "Sometimes" }, { v: "often", l: "Often" },
+      ]},
+      undoneFeelings: { label: "Undone tasks feeling", options: [
+        { v: "unbothered", l: "Unbothered" }, { v: "mildly_annoyed", l: "Mildly annoyed" }, { v: "very_stressed", l: "Very stressed" },
+      ]},
+      notifFrequency: { label: "Notification frequency", options: [
+        { v: "minimal", l: "Minimal" }, { v: "moderate", l: "Moderate" }, { v: "frequent", l: "Frequent" },
+      ]},
+      recognitionPref: { label: "Recognition preference", options: [
+        { v: "public", l: "Public" }, { v: "private", l: "Private" },
+      ]},
+    };
+
+    return (
+      <PageShell narrow topNav>
+        <Header title="Settings" onBack={() => setView("hub")} />
+
+        {/* Account */}
+        <Card style={{ marginBottom: 12 }} delay={0.05}>
+          <p style={{ ...labelStyle, marginBottom: 14 }}>Account</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+            <Avatar name={currentUser?.name} type={currentUser?.type} size={48} image={currentUser?.avatar} crop={currentUser?.avatarCrop} />
+            <div style={{ flex: 1 }}>
+              {editingName ? (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input style={{ ...inputStyle, flex: 1, padding: "8px 12px", fontSize: 14 }}
+                    value={tempName} onChange={(e) => setTempName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleUpdateName(tempName)}
+                    autoFocus />
+                  <button onClick={() => handleUpdateName(tempName)}
+                    style={{ ...btnPrimary, padding: "8px 16px", fontSize: 13 }}>Save</button>
+                  <button onClick={() => setEditingName(false)}
+                    style={{ ...btnGhost, padding: "8px 12px", fontSize: 13 }}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <p style={{ fontWeight: 700, fontSize: 18, color: C.dark }}>{currentUser?.name}</p>
+                  <button onClick={() => { setTempName(currentUser?.name || ""); setEditingName(true); }}
+                    style={{ ...btnBase, padding: "4px 12px", fontSize: 11, borderRadius: 8, background: C.ice, color: C.navy }}>
+                    Edit
+                  </button>
+                </div>
+              )}
+              <p style={{ fontSize: 12, color: C.steel, marginTop: 4 }}>{currentUser?.type === "dependent" ? "Restricted member" : "Full member"}</p>
+            </div>
+          </div>
+        </Card>
+
+        {/* Household */}
+        <Card style={{ marginBottom: 12 }} delay={0.08}>
+          <p style={{ ...labelStyle, marginBottom: 14 }}>Household</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div>
+              <p style={{ fontSize: 12, color: C.steel, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Name</p>
+              <p style={{ fontSize: 16, fontWeight: 600, color: C.dark, marginTop: 2 }}>{appData.household?.name || "—"}</p>
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ fontSize: 12, color: C.steel, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Invite code</p>
+              <p style={{ fontSize: 20, fontWeight: 700, color: C.navy, marginTop: 2, letterSpacing: "0.15em", fontFamily: "monospace" }}>
+                {appData.household?.inviteCode || "—"}
+              </p>
+            </div>
+            <button onClick={() => {
+              navigator.clipboard?.writeText(appData.household?.inviteCode || "");
+              showToast("Invite code copied");
+            }} style={{ ...btnBase, padding: "8px 16px", fontSize: 12, borderRadius: 8, background: C.ice, color: C.navy }}>
+              Copy
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: C.steel, marginTop: 8 }}>
+            {appData.users.length} member{appData.users.length !== 1 ? "s" : ""} in household
+          </p>
+        </Card>
+
+        {/* Time Zone */}
+        <Card style={{ marginBottom: 12 }} delay={0.11}>
+          <p style={{ ...labelStyle, marginBottom: 14 }}>Time Zone</p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <p style={{ fontSize: 14, fontWeight: 600, color: C.dark }}>{userTimezone}</p>
+              <p style={{ fontSize: 11, color: C.steel, marginTop: 2 }}>
+                {currentUser?.timezone ? "Manually set" : "Auto-detected"}
+              </p>
+            </div>
+            {currentUser?.timezone && (
+              <button onClick={() => handleUpdateTimezone(null)}
+                style={{ ...btnBase, padding: "6px 14px", fontSize: 11, borderRadius: 8, background: C.ice, color: C.navy }}>
+                Reset to auto
+              </button>
+            )}
+          </div>
+          <select value={userTimezone}
+            onChange={(e) => handleUpdateTimezone(e.target.value)}
+            style={{ ...inputStyle, marginTop: 12, fontSize: 13, appearance: "none",
+              backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%276%27%3E%3Cpath d=%27M0 0l5 5 5-5%27 stroke=%27%23768A96%27 fill=%27none%27 stroke-width=%271.5%27/%3E%3C/svg%3E")',
+              backgroundRepeat: "no-repeat", backgroundPosition: "right 12px center",
+            }}>
+            {Intl.supportedValuesOf?.("timeZone")?.map((tz) => (
+              <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>
+            )) || (
+              ["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Phoenix",
+               "America/Anchorage","Pacific/Honolulu","Europe/London","Europe/Paris","Europe/Berlin",
+               "Asia/Tokyo","Asia/Shanghai","Australia/Sydney","America/Sao_Paulo","America/Toronto"
+              ].map((tz) => <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>)
+            )}
+          </select>
+        </Card>
+
+        {/* Communication Preferences */}
+        <Card style={{ marginBottom: 12 }} delay={0.14}>
+          <p style={{ ...labelStyle, marginBottom: 14 }}>Communication Preferences</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {Object.entries(commOptions).map(([key, config]) => (
+              <div key={key}>
+                <p style={{ fontSize: 12, color: C.steel, fontWeight: 600, marginBottom: 6 }}>{config.label}</p>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {config.options.map((opt) => {
+                    const isActive = commProfile[key] === opt.v;
+                    return (
+                      <button key={opt.v} onClick={() => handleUpdateCommPref(key, opt.v)} style={{
+                        ...btnBase, padding: "7px 14px", fontSize: 12, borderRadius: 50,
+                        background: isActive ? C.gradientPrimary : C.ice,
+                        color: isActive ? C.white : C.navy,
+                        border: `1px solid ${isActive ? "transparent" : C.borderLight}`,
+                        fontWeight: isActive ? 700 : 500,
+                      }}>{opt.l}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Sign Out */}
+        <Card style={{ marginBottom: 12 }} delay={0.17}>
+          {!confirmSignOut ? (
+            <button onClick={() => setConfirmSignOut(true)} style={{
+              all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+              width: "100%", padding: "14px 0",
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.danger} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+              </svg>
+              <span style={{ fontSize: 15, fontWeight: 600, color: C.danger }}>Sign out</span>
+            </button>
+          ) : (
+            <div style={{ animation: "fadeUp 0.15s ease both" }}>
+              <p style={{ fontSize: 14, color: C.dark, fontWeight: 600, marginBottom: 4 }}>Sign out of this device?</p>
+              <p style={{ fontSize: 13, color: C.steel, marginBottom: 14 }}>Your data is saved. You can sign back in with the invite code.</p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setConfirmSignOut(false)}
+                  style={{ ...btnSecondary, flex: 1 }}>Cancel</button>
+                <button onClick={() => {
+                  localStorage.removeItem('divvy-current-user');
+                  window.location.reload();
+                }} style={{
+                  ...btnBase, flex: 1, padding: "12px 20px", borderRadius: 12,
+                  background: C.danger, color: C.white, fontWeight: 600,
+                }}>Sign out</button>
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {/* About */}
+        <Card style={{ marginBottom: 12 }} delay={0.2}>
+          <p style={{ ...labelStyle, marginBottom: 10 }}>About</p>
+          <p style={{ fontSize: 13, color: C.steel }}>Divvy v2.0</p>
+          <p style={{ fontSize: 12, color: C.steel, marginTop: 4 }}>Split the work. Share the load.</p>
+        </Card>
       </PageShell>
     );
   }

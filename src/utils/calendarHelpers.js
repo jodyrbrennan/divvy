@@ -5,6 +5,7 @@ export function isTaskActiveOnDate(task, date) {
   const dom = date.getDate();
   const dateStr = date.toISOString().slice(0, 10);
 
+  if (task.taskType === "unscheduled") return false;
   // Check task type constraints
   if (task.taskType === "one-time" && task.lastCompleted) return false;
   if (task.taskType === "temporary" && task.tempConfig) {

@@ -90,7 +90,6 @@ export default function ProfileSetupScreen({ onComplete, householdName }) {
           7: { title: "Recognition", sub: "When someone thanks you or celebrates your contribution, how would you like to receive it?", field: "recognitionPref", options: [
             { v: "public", l: "In the household feed", d: "Everyone can see the shout-out" },
             { v: "private", l: "Privately", d: "Just between me and the person" },
-            { v: "both", l: "Both", d: "Public and private — I'll take all the love" },
           ]},
         };
         const def = stepDefs[step];

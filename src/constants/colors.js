@@ -21,5 +21,26 @@ export const C = {
   gradientSubtle: "linear-gradient(180deg, rgba(223,235,246,0.3) 0%, rgba(244,247,250,0) 100%)",
 };
 
+export const FREQ_COLORS = {
+  daily: "#5B9BD5",
+  weekdays: "#7B68EE",
+  weekends: "#E67E22",
+  weekly: "#2ECC71",
+  monthly: "#E74C3C",
+  yearly: "#9B59B6",
+  once: "#F39C12",
+  custom: "#1ABC9C",
+};
+
+export const getFreqColor = (task) => {
+  const freq = task?.scheduleConfig?.frequency || task?.schedule || "once";
+  return FREQ_COLORS[freq] || "#44576D";
+};
+
+export const getFreqLabel = (freq) => {
+  const labels = { daily: "Daily", weekdays: "Weekdays", weekends: "Weekends", weekly: "Weekly", monthly: "Monthly", yearly: "Yearly", once: "One Time", custom: "Custom" };
+  return labels[freq] || freq;
+};
+
 export const font = "'Outfit', sans-serif";
 export const fontDisplay = "'Playfair Display', serif";
