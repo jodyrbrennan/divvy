@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { C, font, fontDisplay } from "../constants/colors";
 import { btnBase, btnPrimary, btnSecondary, btnGhost, inputStyle, labelStyle } from "../constants/styles";
 import { uid } from "../utils/storage";
@@ -14,7 +14,7 @@ import WizardNav from "../components/WizardNav";
 import { DayOfWeekPicker, DayOfMonthPicker } from "../components/DayPickers";
 import TaskPicker from "../components/TaskPicker";
 
-export default function CreateTaskScreen({ onComplete, onBack, users, editingTask, currentUserId, existingTasks }) {
+export default function CreateTaskScreen({ onComplete, onBack, users, editingTask, currentUserId, existingTasks, isReminder }) {
   const isEditing = !!editingTask;
   const [mode, setMode] = useState(isEditing ? "form" : "pick");
   const [step, setStep] = useState(0);
@@ -39,6 +39,11 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
     };
   });
 
+  // Reminders always have 0 points
+  useEffect(() => {
+    if (isReminder && !isEditing) set("points")(0);
+  }, []);
+
   const set = (key) => (val) => setTask((t) => ({ ...t, [key]: val }));
   const setSched = (key) => (val) => setTask((t) => ({ ...t, scheduleConfig: { ...t.scheduleConfig, [key]: val } }));
   const setDue = (key) => (val) => setTask((t) => ({ ...t, dueConfig: { ...t.dueConfig, [key]: val } }));
@@ -46,7 +51,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
   const freq = task.scheduleConfig.frequency;
   const isOneTime = freq === "once";
 
-  const TOTAL_STEPS = 5;
+  const TOTAL_STEPS = isReminder ? 4 : 5;
   const next = () => setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1));
   const prev = () => setStep((s) => Math.max(s - 1, 0));
 
@@ -99,6 +104,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
     lastCompleted: isEditing ? editingTask.lastCompleted : null,
     createdAt: isEditing ? editingTask.createdAt : new Date().toISOString(),
     createdBy: isEditing ? editingTask.createdBy : currentUserId,
+    isReminder: isReminder || false,
   });
 
   const findDuplicate = (newTask) => {
@@ -184,8 +190,8 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
       case 0:
         return (
           <Card>
-            <h3 style={{ fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Task name</h3>
-            <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 22 }}>What needs to be done?</p>
+            <h3 style={{ fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, marginBottom: 4 }}>{isReminder ? "Reminder name" : "Task name"}</h3>
+            <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 22 }}>{isReminder ? "What do you need to remember?" : "What needs to be done?"}</p>
             <div style={{ marginBottom: 20 }}>
               <label style={labelStyle}>Name</label>
               <input style={inputStyle} placeholder="e.g. Vacuum the floors"
@@ -426,17 +432,17 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
         return (
           <Card>
             <h3 style={{ fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Assignment</h3>
-            <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 18 }}>Who is responsible for this task?</p>
+            <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 18 }}>Who is responsible for this {isReminder ? "reminder" : "task"}?</p>
             <p style={{ fontSize: 12, color: C.steel, marginBottom: 14, fontStyle: "italic" }}>Hold to select</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {currentMember && (
-                <HoldOption selected={isMe && !isRotating} onHoldComplete={() => { set("assignMode")("me"); set("assignedTo")([currentUserId]); set("rotation")([]); next(); }}>
+                <HoldOption selected={isMe && !isRotating} onHoldComplete={() => { set("assignMode")("me"); set("assignedTo")([currentUserId]); set("rotation")([]); isReminder ? handleCreate() : next(); }}>
                   <p style={{ fontWeight: 700, fontSize: 15, color: C.dark, textTransform: "uppercase", letterSpacing: "0.04em" }}>Me</p>
                   <p style={{ fontSize: 12, color: C.steel, marginTop: 2 }}>{currentMember.name}</p>
                 </HoldOption>
               )}
               {otherUsers.map((u) => (
-                <HoldOption key={u.id} selected={task.assignMode === u.id} onHoldComplete={() => { set("assignMode")(u.id); set("assignedTo")([u.id]); set("rotation")([]); next(); }}>
+                <HoldOption key={u.id} selected={task.assignMode === u.id} onHoldComplete={() => { set("assignMode")(u.id); set("assignedTo")([u.id]); set("rotation")([]); isReminder ? handleCreate() : next(); }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <Avatar name={u.name} type={u.type} size={28} image={u.avatar} crop={u.avatarCrop} />
                     <div>
@@ -446,7 +452,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
                   </div>
                 </HoldOption>
               ))}
-              <HoldOption selected={isAll} onHoldComplete={() => { set("assignMode")("all"); set("assignedTo")(users.map((u) => u.id)); set("rotation")([]); next(); }}>
+              <HoldOption selected={isAll} onHoldComplete={() => { set("assignMode")("all"); set("assignedTo")(users.map((u) => u.id)); set("rotation")([]); isReminder ? handleCreate() : next(); }}>
                 <p style={{ fontWeight: 700, fontSize: 15, color: C.dark, textTransform: "uppercase", letterSpacing: "0.04em" }}>Everyone</p>
                 <p style={{ fontSize: 12, color: C.steel, marginTop: 2 }}>All {users.length} household members</p>
               </HoldOption>
@@ -484,7 +490,9 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
                     </div>
                   );
                 })}
-                <button onClick={next} style={{ ...btnPrimary, width: "100%", marginTop: 8 }}>Continue</button>
+                <button onClick={isReminder ? handleCreate : next} style={{ ...btnPrimary, width: "100%", marginTop: 8 }}>
+                  {isReminder ? "Create reminder" : "Continue"}
+                </button>
               </div>
             )}
           </Card>
@@ -492,6 +500,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
       }
 
       case 4:
+        if (isReminder) return null;
         return (
           <Card>
             <h3 style={{ fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Points</h3>
@@ -528,7 +537,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
       {mode === "pick" && (
         <>
           <button onClick={onBack} style={btnGhost}>&larr; Back</button>
-          <h2 style={{ fontFamily: fontDisplay, fontSize: 28, fontWeight: 500, margin: "20px 0 8px" }}>Add a task</h2>
+          <h2 style={{ fontFamily: fontDisplay, fontSize: 28, fontWeight: 500, margin: "20px 0 8px" }}>{isReminder ? "Add a reminder" : "Add a task"}</h2>
           <p style={{ color: C.steel, fontSize: 15, lineHeight: 1.55, marginBottom: 32 }}>
             Pick from common household tasks or search for something specific.
           </p>
@@ -538,7 +547,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
           <Card>
             <p style={{ color: C.steel, fontSize: 14, marginBottom: 14 }}>Don't see what you need?</p>
             <button onClick={() => { setMode("form"); setStep(0); }} style={{ ...btnSecondary, width: "100%", fontSize: 14 }}>
-              Create a custom task
+              {isReminder ? "Create a custom reminder" : "Create a custom task"}
             </button>
           </Card>
         </>

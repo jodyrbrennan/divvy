@@ -210,7 +210,7 @@ export default function App() {
     );
   }
 
-  const loggedIn = appData?.currentUserId && ["dashboard", "createTask", "editTask", "addMember"].includes(screen);
+  const loggedIn = appData?.currentUserId && ["dashboard", "createTask", "editTask", "createReminder", "addMember"].includes(screen);
   const currentUserName = appData?.users?.find((u) => u.id === appData?.currentUserId)?.name || "";
   const myUnreadCount = (appData?.notifications || []).filter((n) => n.targetUserId === appData?.currentUserId && !n.read).length;
 
@@ -246,12 +246,14 @@ export default function App() {
       {screen === "dashboard" && <Dashboard appData={appData} setAppData={setAppData}
         onAddMember={() => setScreen("addMember")}
         onCreateTask={() => setScreen("createTask")}
+        onCreateReminder={() => setScreen("createReminder")}
         onEditTask={(task) => { setEditingTask(task); setScreen("editTask"); }}
         requestedView={requestedView} clearRequestedView={() => setRequestedView(null)}
         pendingPreview={pendingPreview} clearPendingPreview={() => setPendingPreview(null)}
       />}
       {screen === "createTask" && <CreateTaskScreen onComplete={handleTaskCreated} onBack={() => setScreen("dashboard")} users={appData.users} currentUserId={appData.currentUserId} existingTasks={appData.tasks} />}
       {screen === "editTask" && <CreateTaskScreen editingTask={editingTask} onComplete={handleTaskEdited} onBack={() => { setEditingTask(null); setScreen("dashboard"); }} users={appData.users} currentUserId={appData.currentUserId} existingTasks={appData.tasks} />}
+      {screen === "createReminder" && <CreateTaskScreen isReminder onComplete={handleTaskCreated} onBack={() => setScreen("dashboard")} users={appData.users} currentUserId={appData.currentUserId} existingTasks={appData.tasks} />}
       {screen === "addMember" && <AddMemberScreen onComplete={handleAddMember} onBack={() => setScreen("dashboard")} />}
     </ToastProvider>
   );

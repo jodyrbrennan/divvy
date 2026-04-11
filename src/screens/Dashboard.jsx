@@ -19,7 +19,7 @@ import CalendarView from "./CalendarView";
 import TaskCompletionDialog from "../components/TaskCompletionDialog";
 
 // ─── Dashboard ─────────────────────────────────────────────────
-export default function Dashboard({ appData, setAppData, onAddMember, onCreateTask, onEditTask, requestedView, clearRequestedView, pendingPreview, clearPendingPreview }) {
+export default function Dashboard({ appData, setAppData, onAddMember, onCreateTask, onCreateReminder, onEditTask, requestedView, clearRequestedView, pendingPreview, clearPendingPreview }) {
   const currentUser = appData.users.find((u) => u.id === appData.currentUserId);
   const [view, setView] = useState("hub");
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
@@ -1438,15 +1438,14 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // HUB VIEW
   // ════════════════════════════════════════════════════════════════
   if (view === "hub") {
-    const todayTasks = appData.tasks.filter((t) => isTaskDueToday(t));
-    const todayDone = appData.tasks.filter((t) => !isTaskDueToday(t) && t.lastCompleted && new Date(t.lastCompleted).toDateString() === new Date().toDateString());
+    const todayTasks = appData.tasks.filter((t) => !t.isReminder && isTaskDueToday(t));
+    const todayReminders = appData.tasks.filter((t) => t.isReminder && isTaskDueToday(t));
     return (
       <PageShell narrow topNav>
         <div style={{ textAlign: "center", marginTop: 16, marginBottom: 32, animation: "fadeUp 0.4s ease both" }}>
-          <p style={{ fontSize: 13, color: C.steel }}>{appData.household?.name}</p>
-          <p style={{ color: C.steel, fontSize: 14, marginTop: 8 }}>
-            {todayTasks.length > 0 ? `${todayTasks.length} task${todayTasks.length !== 1 ? "s" : ""} due today` : "You're all caught up"}
-          </p>
+          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, fontWeight: 700, color: C.dark, letterSpacing: "-0.01em" }}>
+            {appData.household?.name}
+          </h1>
         </div>
 
         {/* Missing relationships warning */}
@@ -1474,8 +1473,59 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
           </button>
         )}
 
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {[
+            { key: "calendar", icon: (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/>
+              </svg>
+            ), label: "Calendar", sub: new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) },
+            { key: "tasks", icon: (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4"/>
+              </svg>
+            ), label: "Tasks", sub: `${todayTasks.length} due today` },
+            { key: "reminders", icon: (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
+              </svg>
+            ), label: "Reminders", sub: `${todayReminders.length} today` },
+            { key: "recognition", icon: (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+              </svg>
+            ), label: "Recognition", sub: `${(appData.recognitions || []).length} shout-out${(appData.recognitions || []).length !== 1 ? "s" : ""}` },
+            { key: "members", icon: (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><circle cx="19" cy="7" r="3"/><path d="M21 21v-2a3 3 0 00-2-2.83"/>
+              </svg>
+            ), label: "Members", sub: `${appData.users.length} member${appData.users.length !== 1 ? "s" : ""}` },
+          ].map((item) => (
+            <button key={item.key} onClick={() => setView(item.key)} style={{
+              all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 18,
+              padding: "22px 24px", borderRadius: 18,
+              background: C.cardBg, backdropFilter: "blur(24px)",
+              border: `1px solid ${C.borderLight}`,
+              boxShadow: "0 4px 24px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.6)",
+              animation: "fadeUp 0.4s ease both",
+              transition: "all 0.2s",
+            }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: 16, background: C.ice,
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              }}>
+                {item.icon}
+              </div>
+              <div>
+                <p style={{ fontWeight: 600, fontSize: 18, color: C.dark }}>{item.label}</p>
+                <p style={{ fontSize: 13, color: C.steel, marginTop: 2 }}>{item.sub}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+
         {/* Command Buttons */}
-        <div style={{ display: "flex", gap: 10, marginBottom: 20, animation: "fadeUp 0.4s ease both" }}>
+        <div style={{ display: "flex", gap: 10, marginTop: 20, animation: "fadeUp 0.4s ease both" }}>
           <button onClick={startVoice} style={{
             all: "unset", cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
@@ -1505,52 +1555,6 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
             </svg>
             <span style={{ fontFamily: font, fontWeight: 600, fontSize: 14, color: C.white }}>Text</span>
           </button>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {[
-            { key: "members", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><circle cx="19" cy="7" r="3"/><path d="M21 21v-2a3 3 0 00-2-2.83"/>
-              </svg>
-            ), label: "Members", sub: `${appData.users.length} member${appData.users.length !== 1 ? "s" : ""}` },
-            { key: "tasks", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4"/>
-              </svg>
-            ), label: "Tasks", sub: `${todayTasks.length} due today` },
-            { key: "calendar", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/>
-              </svg>
-            ), label: "Calendar", sub: new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) },
-            { key: "recognition", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
-              </svg>
-            ), label: "Recognition", sub: `${(appData.recognitions || []).length} shout-out${(appData.recognitions || []).length !== 1 ? "s" : ""}` },
-          ].map((item) => (
-            <button key={item.key} onClick={() => setView(item.key)} style={{
-              all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 18,
-              padding: "22px 24px", borderRadius: 18,
-              background: C.cardBg, backdropFilter: "blur(24px)",
-              border: `1px solid ${C.borderLight}`,
-              boxShadow: "0 4px 24px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.6)",
-              animation: "fadeUp 0.4s ease both",
-              transition: "all 0.2s",
-            }}>
-              <div style={{
-                width: 56, height: 56, borderRadius: 16, background: C.ice,
-                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-              }}>
-                {item.icon}
-              </div>
-              <div>
-                <p style={{ fontWeight: 600, fontSize: 18, color: C.dark }}>{item.label}</p>
-                <p style={{ fontSize: 13, color: C.steel, marginTop: 2 }}>{item.sub}</p>
-              </div>
-            </button>
-          ))}
         </div>
 
         {/* ── DEV ONLY: User Switcher ── */}
@@ -2391,7 +2395,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // TASKS VIEW
   // ════════════════════════════════════════════════════════════════
   if (view === "tasks") {
-    const dueTasks = appData.tasks.filter((t) => isTaskDueToday(t));
+    const dueTasks = appData.tasks.filter((t) => !t.isReminder && isTaskDueToday(t));
     return (
       <>
       <PageShell narrow topNav>
@@ -2492,6 +2496,87 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
         </div>
       )}
       </>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // REMINDERS VIEW
+  // ════════════════════════════════════════════════════════════════
+  if (view === "reminders") {
+    const dueReminders = appData.tasks.filter((t) => t.isReminder && isTaskDueToday(t));
+    const completedReminders = appData.tasks.filter((t) => t.isReminder && !isTaskDueToday(t) && t.lastCompleted && new Date(t.lastCompleted).toDateString() === new Date().toDateString());
+    const allReminders = appData.tasks.filter((t) => t.isReminder);
+    return (
+      <PageShell narrow topNav>
+        <Header title="Reminders" onBack={() => setView("hub")} />
+
+        <Card delay={0.05}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h3 style={{ fontFamily: fontDisplay, fontSize: 19, fontWeight: 600 }}>Today's Reminders</h3>
+            <button onClick={onCreateReminder} style={{
+              ...btnBase, padding: "8px 16px", fontSize: 13, borderRadius: 10,
+              background: C.gradientPrimary, color: C.white, boxShadow: "0 2px 10px rgba(41,53,60,0.2)",
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              <PlusIcon size={16} /> Add
+            </button>
+          </div>
+
+          {dueReminders.length === 0 && completedReminders.length === 0 ? (
+            <p style={{ color: C.steel, fontSize: 14, textAlign: "center", padding: "28px 0" }}>
+              {allReminders.length === 0 ? "No reminders yet. Tap \"Add\" to create your first one." : "No reminders for today."}
+            </p>
+          ) : (
+            <>
+              {dueReminders.map((t, i) => (
+                <div key={t.id}>
+                  <TaskRow task={t} />
+                  {i < dueReminders.length - 1 && <Divider />}
+                </div>
+              ))}
+              {completedReminders.length > 0 && (
+                <>
+                  {dueReminders.length > 0 && <div style={{ margin: "8px 0" }} />}
+                  <p style={{ ...labelStyle, marginBottom: 8, fontSize: 10 }}>Done</p>
+                  {completedReminders.map((t, i) => (
+                    <div key={t.id}>
+                      <TaskRow task={t} compact />
+                      {i < completedReminders.length - 1 && <Divider />}
+                    </div>
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </Card>
+
+        {/* All reminders list */}
+        {allReminders.length > 0 && (
+          <Card style={{ marginTop: 12 }} delay={0.1}>
+            <p style={{ ...labelStyle, marginBottom: 12 }}>All Reminders</p>
+            {allReminders.map((t, i) => (
+              <div key={t.id}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0" }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.sky, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontWeight: 600, fontSize: 14, color: C.dark }}>{t.name}</p>
+                    <p style={{ fontSize: 11, color: C.steel, marginTop: 2 }}>{getScheduleLabel(t)}</p>
+                  </div>
+                  <button onClick={() => handleDeleteTask(t.id)} style={{
+                    ...btnBase, padding: "4px 10px", fontSize: 11, borderRadius: 6,
+                    background: "rgba(192,57,43,0.06)", color: C.danger,
+                  }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={C.danger} strokeWidth="2" strokeLinecap="round">
+                      <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
+                {i < allReminders.length - 1 && <Divider />}
+              </div>
+            ))}
+          </Card>
+        )}
+      </PageShell>
     );
   }
 
