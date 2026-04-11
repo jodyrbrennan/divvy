@@ -194,36 +194,24 @@ export default function Dashboard({ appData, setAppData, onAddMember, onCreateTa
       u.id === userId ? { ...u, pointBalance: (u.pointBalance || 0) + totalPoints } : u
     );
 
-    // Build notifications inline instead of calling sendSystemNotification
-    const completerName = appData.users.find((u) => u.id === userId)?.name || "Someone";
-    const newNotifications = [];
-    for (const task of completionDialogTasks) {
-      if (task.createdBy && task.createdBy !== userId && task.createdBy !== appData.currentUserId) {
-        newNotifications.push({
-          id: uid(), type: "completion", targetUserId: task.createdBy, fromUserId: "system",
-          rawMessage: `${completerName} completed the task: "${task.name}"`,
-          message: `${completerName} completed the task: "${task.name}"`,
-          read: false, timestamp: now, taskId: task.id, completedBy: userId,
-        });
-      }
-      const others = (task.assignedTo || []).filter((id) => id !== userId && id !== appData.currentUserId);
-      for (const otherId of others) {
-        newNotifications.push({
-          id: uid(), type: "completion", targetUserId: otherId, fromUserId: "system",
-          rawMessage: `${completerName} completed your task: "${task.name}"`,
-          message: `${completerName} completed your task: "${task.name}"`,
-          read: false, timestamp: now, taskId: task.id, completedBy: userId,
-        });
-      }
-    }
-
     const newData = {
       ...appData,
       tasks: updatedTasks,
       users: updatedUsers,
       completions: [...appData.completions, ...newCompletions],
-      notifications: [...(appData.notifications || []), ...newNotifications],
     };
+
+    // Send notifications
+    const completerName = appData.users.find((u) => u.id === userId)?.name || "Someone";
+    for (const task of completionDialogTasks) {
+      if (task.createdBy && task.createdBy !== userId) {
+        sendSystemNotification(task.createdBy, "completion", `${completerName} completed the task: "${task.name}"`, { taskId: task.id, completedBy: userId });
+      }
+      const others = (task.assignedTo || []).filter((id) => id !== userId);
+      for (const otherId of others) {
+        sendSystemNotification(otherId, "completion", `${completerName} completed your task: "${task.name}"`, { taskId: task.id, completedBy: userId });
+      }
+    }
 
     const count = completionDialogTasks.length;
     setCompletionDialogTasks(null);
@@ -2283,6 +2271,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   if (view === "tasks") {
     const dueTasks = appData.tasks.filter((t) => isTaskDueToday(t));
+    const doneTasks = appData.tasks.filter((t) => !isTaskDueToday(t));
     return (
       <>
       <PageShell narrow topNav>
@@ -2290,7 +2279,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
 
         <Card delay={0.05}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h3 style={{ fontFamily: fontDisplay, fontSize: 19, fontWeight: 600 }}>Tasks Due Today</h3>
+            <h3 style={{ fontFamily: fontDisplay, fontSize: 19, fontWeight: 600 }}>All Tasks</h3>
             <button onClick={onCreateTask} style={{
               ...btnBase, padding: "8px 16px", fontSize: 13, borderRadius: 10,
               background: C.gradientPrimary, color: C.white, boxShadow: "0 2px 10px rgba(41,53,60,0.2)",
@@ -2300,19 +2289,31 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
             </button>
           </div>
 
-          {dueTasks.length === 0 ? (
+          {appData.tasks.length === 0 ? (
             <p style={{ color: C.steel, fontSize: 14, textAlign: "center", padding: "28px 0" }}>
-              {appData.tasks.length === 0 ? "No tasks yet. Tap \"Add task\" to create your first one." : "You're all caught up! No tasks due right now."}
+              No tasks yet. Tap "Add task" to create your first one.
             </p>
           ) : (
             <>
               <SelectionBar tasks={appData.tasks} />
-              {dueTasks.map((t, i) => (
+              {dueTasks.length > 0 && dueTasks.map((t, i) => (
                 <div key={t.id}>
                   <TaskRow task={t} />
                   {i < dueTasks.length - 1 && <Divider />}
                 </div>
               ))}
+              {doneTasks.length > 0 && (
+                <>
+                  {dueTasks.length > 0 && <div style={{ margin: "12px 0" }} />}
+                  <p style={{ ...labelStyle, marginBottom: 10, fontSize: 10 }}>Completed</p>
+                  {doneTasks.map((t, i) => (
+                    <div key={t.id}>
+                      <TaskRow task={t} />
+                      {i < doneTasks.length - 1 && <Divider />}
+                    </div>
+                  ))}
+                </>
+              )}
             </>
           )}
         </Card>

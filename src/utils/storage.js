@@ -79,5 +79,27 @@ export async function saveData(appData) {
   }
 }
 
+// Real-time subscription — calls onUpdate whenever another device changes data
+export function subscribeToChanges(onUpdate) {
+  const channel = supabase
+    .channel('household-changes')
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'households', filter: `id=eq.${HOUSEHOLD_ID}` },
+      (payload) => {
+        const sharedData = payload.new?.data;
+        if (sharedData) {
+          const localUserId = localStorage.getItem('divvy-current-user');
+          onUpdate({ ...sharedData, currentUserId: localUserId || null });
+        }
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
 export const uid = () => Math.random().toString(36).slice(2, 10);
 export const makeInviteCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();

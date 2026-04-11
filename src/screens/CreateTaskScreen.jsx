@@ -11,7 +11,6 @@ import Chip from "../components/Chip";
 import Avatar from "../components/Avatar";
 import HoldOption from "../components/HoldOption";
 import WizardNav from "../components/WizardNav";
-import MiniCalendar from "../components/MiniCalendar";
 import { DayOfWeekPicker, DayOfMonthPicker } from "../components/DayPickers";
 import TaskPicker from "../components/TaskPicker";
 
@@ -20,17 +19,13 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
   const [mode, setMode] = useState(isEditing ? "form" : "pick");
   const [step, setStep] = useState(0);
   const [parsing, setParsing] = useState(false);
-  const [calMonth, setCalMonth] = useState(new Date().getMonth());
-  const [calYear, setCalYear] = useState(new Date().getFullYear());
 
   const [task, setTask] = useState(() => {
     if (editingTask) {
-      const sc = editingTask.scheduleConfig || { frequency: editingTask.schedule || "daily", weeklyDays: [], monthlyDays: [], yearlyMonth: 0, yearlyDay: 1, customDescription: "", customSummary: "", customInterval: null };
+      const sc = editingTask.scheduleConfig || { frequency: editingTask.schedule || "daily", weeklyDays: [], monthlyDays: [], monthlyMode: "dayOfMonth", monthlyWeek: 1, monthlyWeekday: 1, yearlyMonth: 0, yearlyDay: 1, customDescription: "", customSummary: "", customInterval: null };
       return {
         name: editingTask.name || "", description: editingTask.description || "", points: editingTask.points || 10,
         scheduleConfig: sc,
-        taskType: editingTask.taskType || "permanent",
-        tempConfig: editingTask.tempConfig || { mode: "duration", count: 1, unit: "weeks", rangeStart: "", rangeEnd: "", dates: [], startDate: new Date().toISOString().slice(0, 10) },
         dueConfig: editingTask.dueConfig || { type: "none", date: "", time: "", timeEnd: "" },
         assignMode: editingTask.assignMode === "rotating" ? "rotating" : editingTask.assignedTo?.length === users.length ? "all" : editingTask.assignedTo?.length === 1 && editingTask.assignedTo[0] === currentUserId ? "me" : editingTask.assignedTo?.length === 1 ? editingTask.assignedTo[0] : editingTask.assignMode || "all",
         assignedTo: editingTask.assignedTo || [], rotation: editingTask.rotation || [],
@@ -38,9 +33,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
     }
     return {
       name: "", description: "", points: 10,
-      scheduleConfig: { frequency: "daily", weeklyDays: [], monthlyDays: [], yearlyMonth: 0, yearlyDay: 1, customDescription: "", customSummary: "", customInterval: null },
-      taskType: "permanent",
-      tempConfig: { mode: "duration", count: 1, unit: "weeks", rangeStart: "", rangeEnd: "", dates: [], startDate: new Date().toISOString().slice(0, 10) },
+      scheduleConfig: { frequency: "daily", weeklyDays: [], monthlyDays: [], monthlyMode: "dayOfMonth", monthlyWeek: 1, monthlyWeekday: 1, yearlyMonth: 0, yearlyDay: 1, customDescription: "", customSummary: "", customInterval: null },
       dueConfig: { type: "none", date: "", time: "", timeEnd: "" },
       assignMode: "all", assignedTo: [], rotation: [],
     };
@@ -48,27 +41,14 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
 
   const set = (key) => (val) => setTask((t) => ({ ...t, [key]: val }));
   const setSched = (key) => (val) => setTask((t) => ({ ...t, scheduleConfig: { ...t.scheduleConfig, [key]: val } }));
-  const setTemp = (key) => (val) => setTask((t) => ({ ...t, tempConfig: { ...t.tempConfig, [key]: val } }));
   const setDue = (key) => (val) => setTask((t) => ({ ...t, dueConfig: { ...t.dueConfig, [key]: val } }));
 
   const freq = task.scheduleConfig.frequency;
-  const isRecurring = ["daily", "weekdays", "weekends", "weekly", "monthly", "yearly", "custom"].includes(freq);
-  const needsDatePicker = task.taskType === "one-time" || !isRecurring;
+  const isOneTime = freq === "once";
 
-  const TOTAL_STEPS = 6;
+  const TOTAL_STEPS = 5;
   const next = () => setStep((s) => Math.min(s + 1, TOTAL_STEPS - 1));
   const prev = () => setStep((s) => Math.max(s - 1, 0));
-
-  const changeCalMonth = (dir) => {
-    let m = calMonth + dir, y = calYear;
-    if (m < 0) { m = 11; y--; } else if (m > 11) { m = 0; y++; }
-    setCalMonth(m); setCalYear(y);
-  };
-
-  const toggleCalDate = (dateStr) => {
-    const dates = task.tempConfig.dates || [];
-    setTemp("dates")(dates.includes(dateStr) ? dates.filter((d) => d !== dateStr) : [...dates, dateStr].sort());
-  };
 
   const handleCatalogSelect = (catalogTask) => {
     setTask((t) => ({
@@ -108,8 +88,8 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
     id: isEditing ? editingTask.id : uid(),
     name: task.name.trim(), description: task.description.trim(),
     schedule: task.scheduleConfig.frequency, scheduleConfig: task.scheduleConfig,
-    taskType: task.taskType,
-    tempConfig: (task.taskType === "temporary" || task.taskType === "seasonal") ? task.tempConfig : null,
+    taskType: isOneTime ? "one-time" : "permanent",
+    tempConfig: null,
     dueConfig: task.dueConfig,
     timeDue: task.dueConfig.time || null,
     assignedTo: resolveAssignment(), assignMode: task.assignMode,
@@ -165,22 +145,13 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
     setDuplicateModal(null);
   };
 
-  const handleDupeCancel = () => {
-    setDuplicateModal(null);
-  };
+  const handleDupeCancel = () => setDuplicateModal(null);
 
   const handleDupeAllow = () => {
     if (!duplicateModal) return;
     onComplete({ ...duplicateModal.newTask, duplicateOf: duplicateModal.existing.id, duplicateReason: dupeReason.trim() || "Intentional duplicate" });
     setDuplicateModal(null);
     setDupeReason("");
-  };
-
-  const toggleUser = (userId) => {
-    setTask((t) => ({
-      ...t,
-      assignedTo: t.assignedTo.includes(userId) ? t.assignedTo.filter((id) => id !== userId) : [...t.assignedTo, userId],
-    }));
   };
 
   const toggleRotationDay = (userId, day) => {
@@ -198,9 +169,15 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
   const isStepValid = () => {
     if (step === 0) return task.name.trim().length > 0;
     if (step === 1 && freq === "weekly") return task.scheduleConfig.weeklyDays.length > 0;
-    if (step === 1 && freq === "monthly") return task.scheduleConfig.monthlyDays.length > 0;
+    if (step === 1 && freq === "monthly") {
+      if (task.scheduleConfig.monthlyMode === "dayOfMonth") return task.scheduleConfig.monthlyDays.length > 0;
+      return true;
+    }
     return true;
   };
+
+  const WEEK_LABELS = ["1st", "2nd", "3rd", "4th", "Last"];
+  const WEEKDAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
   const renderStep = () => {
     switch (step) {
@@ -231,33 +208,79 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
         return (
           <Card>
             <h3 style={{ fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Frequency</h3>
-            <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 22 }}>How often should this task repeat?</p>
+            <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 22 }}>How often does this task need to happen?</p>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 18 }}>
               {[
-                { v: "daily", l: "Daily" }, { v: "weekdays", l: "Weekdays" }, { v: "weekends", l: "Weekends" },
-                { v: "weekly", l: "Weekly" }, { v: "monthly", l: "Monthly" }, { v: "yearly", l: "Yearly" },
+                { v: "once", l: "One Time" },
+                { v: "daily", l: "Daily" },
+                { v: "weekdays", l: "Weekdays" },
+                { v: "weekends", l: "Weekends" },
+                { v: "weekly", l: "Weekly" },
+                { v: "monthly", l: "Monthly" },
+                { v: "yearly", l: "Yearly" },
                 { v: "custom", l: "Custom" },
               ].map((o) => (
                 <Chip key={o.v} label={o.l} selected={freq === o.v} onClick={() => setSched("frequency")(o.v)} />
               ))}
             </div>
+
             {freq === "weekly" && (
               <div style={{ animation: "fadeUp 0.2s ease both" }}>
                 <label style={labelStyle}>Which days?</label>
                 <DayOfWeekPicker selected={task.scheduleConfig.weeklyDays} onChange={setSched("weeklyDays")} />
               </div>
             )}
+
             {freq === "monthly" && (
               <div style={{ animation: "fadeUp 0.2s ease both" }}>
-                <label style={labelStyle}>Which days of the month?</label>
-                <DayOfMonthPicker selected={task.scheduleConfig.monthlyDays} onChange={setSched("monthlyDays")} />
+                <label style={labelStyle}>Repeat on...</label>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  <Chip label="Day of month" selected={task.scheduleConfig.monthlyMode === "dayOfMonth"}
+                    onClick={() => setSched("monthlyMode")("dayOfMonth")} />
+                  <Chip label="Day of week" selected={task.scheduleConfig.monthlyMode === "dayOfWeek"}
+                    onClick={() => setSched("monthlyMode")("dayOfWeek")} />
+                </div>
+
+                {task.scheduleConfig.monthlyMode === "dayOfMonth" && (
+                  <div style={{ animation: "fadeUp 0.15s ease both" }}>
+                    <label style={labelStyle}>Which day(s) of the month?</label>
+                    <DayOfMonthPicker selected={task.scheduleConfig.monthlyDays} onChange={setSched("monthlyDays")} />
+                  </div>
+                )}
+
+                {task.scheduleConfig.monthlyMode === "dayOfWeek" && (
+                  <div style={{ animation: "fadeUp 0.15s ease both", display: "flex", gap: 12 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={labelStyle}>Which week</label>
+                      <select value={task.scheduleConfig.monthlyWeek || 1}
+                        onChange={(e) => setSched("monthlyWeek")(parseInt(e.target.value))}
+                        style={{ ...inputStyle, appearance: "none" }}>
+                        {WEEK_LABELS.map((label, i) => (
+                          <option key={i} value={i + 1}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={labelStyle}>Which day</label>
+                      <select value={task.scheduleConfig.monthlyWeekday ?? 1}
+                        onChange={(e) => setSched("monthlyWeekday")(parseInt(e.target.value))}
+                        style={{ ...inputStyle, appearance: "none" }}>
+                        {WEEKDAY_LABELS.map((label, i) => (
+                          <option key={i} value={i}>{label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+
             {freq === "yearly" && (
               <div style={{ animation: "fadeUp 0.2s ease both", display: "flex", gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <label style={labelStyle}>Month</label>
-                  <select value={task.scheduleConfig.yearlyMonth} onChange={(e) => setSched("yearlyMonth")(parseInt(e.target.value))}
+                  <select value={task.scheduleConfig.yearlyMonth}
+                    onChange={(e) => setSched("yearlyMonth")(parseInt(e.target.value))}
                     style={{ ...inputStyle, appearance: "none" }}>
                     {MONTH_NAMES.map((m, i) => <option key={i} value={i}>{m}</option>)}
                   </select>
@@ -269,6 +292,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
                 </div>
               </div>
             )}
+
             {freq === "custom" && (
               <div style={{ animation: "fadeUp 0.2s ease both" }}>
                 <label style={labelStyle}>Describe the schedule</label>
@@ -293,6 +317,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
                 )}
               </div>
             )}
+
             <button onClick={next} disabled={!isStepValid()}
               style={{ ...btnPrimary, width: "100%", marginTop: 22, opacity: isStepValid() ? 1 : 0.45 }}>
               Continue
@@ -303,81 +328,12 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
       case 2:
         return (
           <Card>
-            <h3 style={{ fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Task type</h3>
-            <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 22 }}>How long will this task be active?</p>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-              {[
-                { v: "permanent", l: "Permanent" }, { v: "temporary", l: "Temporary" },
-                { v: "seasonal", l: "Seasonal" }, { v: "one-time", l: "One-time" },
-              ].map((o) => (
-                <Chip key={o.v} label={o.l} selected={task.taskType === o.v} onClick={() => set("taskType")(o.v)} />
-              ))}
-            </div>
-            {(task.taskType === "temporary" || task.taskType === "seasonal") && (
-              <div style={{ marginTop: 18, animation: "fadeUp 0.2s ease both" }}>
-                <label style={labelStyle}>How long is it active?</label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-                  {[
-                    { v: "duration", l: "Set duration" }, { v: "dateRange", l: "Date range" },
-                    { v: "specificDates", l: "Pick specific dates" },
-                  ].map((o) => (
-                    <Chip key={o.v} label={o.l} selected={task.tempConfig.mode === o.v} onClick={() => setTemp("mode")(o.v)} />
-                  ))}
-                </div>
-                {task.tempConfig.mode === "duration" && (
-                  <div style={{ display: "flex", gap: 10, alignItems: "flex-end", animation: "fadeUp 0.15s ease both" }}>
-                    <div>
-                      <label style={labelStyle}>Starting from</label>
-                      <input type="date" value={task.tempConfig.startDate} onChange={(e) => setTemp("startDate")(e.target.value)} style={{ ...inputStyle, width: 160 }} />
-                    </div>
-                    <div>
-                      <label style={labelStyle}>For</label>
-                      <input type="number" min="1" value={task.tempConfig.count} onChange={(e) => setTemp("count")(parseInt(e.target.value) || 1)} style={{ ...inputStyle, width: 70, textAlign: "center" }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <select value={task.tempConfig.unit} onChange={(e) => setTemp("unit")(e.target.value)} style={{ ...inputStyle, appearance: "none" }}>
-                        {["days", "weeks", "months", "years"].map((u) => <option key={u} value={u}>{u}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                )}
-                {task.tempConfig.mode === "dateRange" && (
-                  <div style={{ display: "flex", gap: 10, animation: "fadeUp 0.15s ease both" }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={labelStyle}>From</label>
-                      <input type="date" value={task.tempConfig.rangeStart} onChange={(e) => setTemp("rangeStart")(e.target.value)} style={inputStyle} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={labelStyle}>To</label>
-                      <input type="date" value={task.tempConfig.rangeEnd} onChange={(e) => setTemp("rangeEnd")(e.target.value)} style={inputStyle} />
-                    </div>
-                  </div>
-                )}
-                {task.tempConfig.mode === "specificDates" && (
-                  <div style={{ animation: "fadeUp 0.15s ease both" }}>
-                    <MiniCalendar selectedDates={task.tempConfig.dates || []} onToggleDate={toggleCalDate}
-                      month={calMonth} year={calYear} onChangeMonth={changeCalMonth} />
-                    {(task.tempConfig.dates || []).length > 0 && (
-                      <p style={{ fontSize: 12, color: C.steel, marginTop: 8 }}>
-                        {task.tempConfig.dates.length} date{task.tempConfig.dates.length !== 1 ? "s" : ""} selected
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-            <button onClick={next} style={{ ...btnPrimary, width: "100%", marginTop: 22 }}>Continue</button>
-          </Card>
-        );
-
-      case 3:
-        return (
-          <Card>
             <h3 style={{ fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Due Date/Time</h3>
             <p style={{ color: C.steel, fontSize: 13, lineHeight: 1.5, marginBottom: 22 }}>
-              {needsDatePicker ? "When is this task due?" : "Is there a specific time this task should be completed by?"}
+              {isOneTime ? "When is this task due?" : "Is there a specific time this task should be completed by?"}
             </p>
-            {!needsDatePicker && (
+
+            {!isOneTime && (
               <>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {[
@@ -418,7 +374,8 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
                 )}
               </>
             )}
-            {needsDatePicker && (
+
+            {isOneTime && (
               <>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {[
@@ -459,7 +416,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
           </Card>
         );
 
-      case 4: {
+      case 3: {
         const currentMember = users.find((u) => u.id === currentUserId);
         const otherUsers = users.filter((u) => u.id !== currentUserId);
         const isMe = task.assignMode === "me";
@@ -534,7 +491,7 @@ export default function CreateTaskScreen({ onComplete, onBack, users, editingTas
         );
       }
 
-      case 5:
+      case 4:
         return (
           <Card>
             <h3 style={{ fontFamily: fontDisplay, fontSize: 22, fontWeight: 500, marginBottom: 4 }}>Points</h3>

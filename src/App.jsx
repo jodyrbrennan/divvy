@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { C, font } from "./constants/colors";
-import { loadData, saveData, uid } from "./utils/storage";
+import { loadData, saveData, uid, subscribeToChanges } from "./utils/storage";
 import { rewriteForUser } from "./utils/communication";
 import { propagateRelationships } from "./utils/relationships";
 import GlobalStyles from "./components/GlobalStyles";
@@ -33,6 +33,14 @@ export default function App() {
     });
   }, []);
 
+  // Real-time sync: update when another device changes data
+  useEffect(() => {
+    const unsubscribe = subscribeToChanges((newData) => {
+      setAppData(newData);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const handleHouseholdCreated = (household) => { setPendingHousehold(household); setScreen("profileSetup"); };
 
   const handleJoined = (result) => {
@@ -45,7 +53,6 @@ export default function App() {
     let newData;
 
     if (pendingUserId) {
-      // Taking over a pending user slot
       const updatedUsers = appData.users.map((u) =>
         u.id === pendingUserId
           ? {
@@ -69,7 +76,6 @@ export default function App() {
         currentUserId: pendingUserId,
       };
     } else {
-      // Brand new user joining the household
       const user = {
         id: uid(), name: profile.name, type: profile.type, pointBalance: 0,
         relationships: {}, relationshipTags: {},
