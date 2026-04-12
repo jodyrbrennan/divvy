@@ -1,5 +1,22 @@
 export const RECIPROCAL = { spouse: "spouse", partner: "partner", parent: "child", child: "parent", sibling: "sibling", roommate: "roommate", grandparent: "grandchild", grandchild: "grandparent", other: "other" };
 
+/**
+ * Shared relationship options used by Dashboard.jsx and AddMemberScreen.jsx.
+ * The `d` field provides a description for the AddMemberScreen hold-to-select UI.
+ * The `altLabel` field provides an alternative label phrased as "I'm their X" for AddMemberScreen.
+ */
+export const RELATIONSHIP_OPTIONS = [
+  { v: "spouse", l: "Spouse", d: "Married partner", altLabel: "Spouse" },
+  { v: "partner", l: "Partner", d: "Unmarried partner", altLabel: "Partner" },
+  { v: "parent", l: "Parent", d: "They are my child", altLabel: "I'm their parent" },
+  { v: "child", l: "Child", d: "They are my parent", altLabel: "I'm their child" },
+  { v: "sibling", l: "Sibling", d: "Brother or sister", altLabel: "Sibling" },
+  { v: "roommate", l: "Roommate", d: "We share a living space", altLabel: "Roommate" },
+  { v: "grandparent", l: "Grandparent", d: "They are my grandchild", altLabel: "I'm their grandparent" },
+  { v: "grandchild", l: "Grandchild", d: "They are my grandparent", altLabel: "I'm their grandchild" },
+  { v: "other", l: "Other", d: "Another type of relationship", altLabel: "Other" },
+];
+
 export function propagateRelationships(users) {
   let changed = true;
   let iterations = 0;

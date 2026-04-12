@@ -41,67 +41,97 @@ function completedToday(task, now) {
   return new Date(task.lastCompleted).toDateString() === now.toDateString();
 }
 
-export function isTaskDueToday(task) {
+/**
+ * Core scheduling logic: Is this task scheduled to occur on the given date?
+ * This is a PURE scheduling check — it does NOT consider completion status.
+ * Used by both isTaskDueToday (adds completion checks) and isTaskActiveOnDate (calendar).
+ *
+ * @param {Object} task - A task object from appData.tasks
+ * @param {Date} date - The date to check
+ * @returns {boolean} Whether the task is scheduled for this date
+ */
+export function isTaskScheduledForDate(task, date) {
   const s = task.scheduleConfig || {};
   const freq = s.frequency || task.schedule || "once";
-  const now = new Date();
-  const today = now.getDay();
-  const dateNum = now.getDate();
+  const dow = date.getDay();
+  const dom = date.getDate();
+  const dateStr = date.toISOString().slice(0, 10);
 
+  // Unscheduled tasks are never "scheduled" for any date
   if (task.taskType === "unscheduled") return false;
-  // Check task type constraints
-  if (task.taskType === "one-time" && task.lastCompleted) return false;
+
+  // Check task type constraints (temporary tasks have date boundaries)
   if (task.taskType === "temporary" && task.tempConfig) {
     const tc = task.tempConfig;
-    if (tc.mode === "dateRange") {
-      const start = new Date(tc.rangeStart + "T00:00:00");
-      const end = new Date(tc.rangeEnd + "T23:59:59");
-      if (now < start || now > end) return false;
+    if (tc.mode === "dateRange" && tc.rangeStart && tc.rangeEnd) {
+      if (dateStr < tc.rangeStart || dateStr > tc.rangeEnd) return false;
     }
     if (tc.mode === "specificDates" && tc.dates?.length) {
-      const todayStr = now.toISOString().slice(0, 10);
-      if (!tc.dates.includes(todayStr)) return false;
+      if (!tc.dates.includes(dateStr)) return false;
     }
     if (tc.mode === "duration" && tc.startDate) {
       const start = new Date(tc.startDate + "T00:00:00");
       const days = tc.unit === "days" ? tc.count : tc.unit === "weeks" ? tc.count * 7 : tc.unit === "months" ? tc.count * 30 : tc.count * 365;
       const end = new Date(start.getTime() + days * 86400000);
-      if (now < start || now > end) return false;
+      if (date < start || date > end) return false;
     }
   }
 
   // Check active range due config
-  if (task.dueConfig?.type === "activeRange") {
-    const start = new Date(task.dueConfig.rangeStart + "T00:00:00");
-    const end = new Date(task.dueConfig.rangeEnd + "T23:59:59");
-    if (now < start || now > end) return false;
+  if (task.dueConfig?.type === "activeRange" && task.dueConfig.rangeStart) {
+    if (dateStr < task.dueConfig.rangeStart || dateStr > task.dueConfig.rangeEnd) return false;
+  }
+
+  // Check specific due date (the task is only scheduled on that exact date)
+  if (task.dueConfig?.type === "date" || task.dueConfig?.type === "datetime") {
+    if (task.dueConfig.date && task.dueConfig.date !== dateStr) return false;
+    return true;
   }
 
   // Check frequency
-  if (freq === "once" || freq === "daily") {
-    const last = task.lastCompleted ? new Date(task.lastCompleted) : null;
-    if (!last) return true;
-    return now.toDateString() !== last.toDateString();
+  if (freq === "daily") return true;
+  if (freq === "weekdays") return dow >= 1 && dow <= 5;
+  if (freq === "weekends") return dow === 0 || dow === 6;
+  if (freq === "weekly" && s.weeklyDays?.length) return s.weeklyDays.includes(dow);
+  if (freq === "weekly") return dow === 1; // default: Monday
+  if (freq === "monthly" && s.monthlyDays?.length) return s.monthlyDays.includes(dom);
+  if (freq === "monthly") return dom === 1; // default: 1st of month
+  if (freq === "yearly") {
+    const m = s.yearlyMonth ?? 0;
+    const d = s.yearlyDay ?? 1;
+    return date.getMonth() === m && dom === d;
   }
-  if (freq === "weekdays") return today >= 1 && today <= 5 && !completedToday(task, now);
-  if (freq === "weekends") return (today === 0 || today === 6) && !completedToday(task, now);
-  if (freq === "weekly" && s.weeklyDays?.length) return s.weeklyDays.includes(today) && !completedToday(task, now);
-  if (freq === "monthly" && s.monthlyDays?.length) return s.monthlyDays.includes(dateNum) && !completedToday(task, now);
   if (freq === "custom" && s.customInterval?.days && s.customInterval?.startDate) {
     const start = new Date(s.customInterval.startDate + "T00:00:00");
-    const diffDays = Math.floor((now - start) / 86400000);
+    const diffDays = Math.floor((date - start) / 86400000);
     if (diffDays < 0) return false;
-    return diffDays % s.customInterval.days === 0 && !completedToday(task, now);
+    return diffDays % s.customInterval.days === 0;
+  }
+  if (freq === "once") {
+    // One-time tasks: scheduled on their creation date
+    if (task.createdAt) return dateStr === task.createdAt.slice(0, 10);
+    return false;
   }
 
-  // Fallback for legacy string schedule
-  const last = task.lastCompleted ? new Date(task.lastCompleted) : null;
-  if (!last) return true;
-  const diffMs = now - last;
-  const diffDays = diffMs / 86400000;
-  if (freq === "weekly") return diffDays >= 7;
-  if (freq === "monthly") return diffDays >= 30;
-  if (freq === "yearly") return diffDays >= 365;
+  return false;
+}
+
+/**
+ * Is this task due today? Combines scheduling logic with completion checks.
+ * A task is "due today" if it is scheduled for today AND has not been completed today.
+ */
+export function isTaskDueToday(task) {
+  const now = new Date();
+
+  // One-time tasks that have ever been completed are done forever
+  if (task.taskType === "one-time" && task.lastCompleted) return false;
+
+  // Check if the task is scheduled for today
+  if (!isTaskScheduledForDate(task, now)) return false;
+
+  // Check if it was already completed today
+  if (completedToday(task, now)) return false;
+
   return true;
 }
 

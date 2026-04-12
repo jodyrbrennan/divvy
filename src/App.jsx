@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { C, font } from "./constants/colors";
 import { loadData, saveData, uid, subscribeToChanges } from "./utils/storage";
+import { createNotification } from "./utils/notificationHelpers";
 import { rewriteForUser } from "./utils/communication";
 import { propagateRelationships } from "./utils/relationships";
 import GlobalStyles from "./components/GlobalStyles";
@@ -49,55 +50,62 @@ export default function App() {
     setScreen("profileSetup");
   };
 
-  const handleProfileComplete = async (profile) => {
-    let newData;
+  // Phase 6.2: Uses functional updater to prevent race conditions
+  const handleProfileComplete = (profile) => {
+    const newUserId = pendingUserId || uid();
 
-    if (pendingUserId) {
-      const updatedUsers = appData.users.map((u) =>
-        u.id === pendingUserId
-          ? {
-              ...u,
-              name: profile.name,
-              type: "full",
-              status: "active",
-              inviteCode: null,
-              communicationProfile: {
-                tone: profile.tone, sensitivity: profile.sensitivity, forgetfulness: profile.forgetfulness,
-                undoneFeelings: profile.undoneFeelings, askStyle: profile.askStyle,
-                notifFrequency: profile.notifFrequency, recognitionPref: profile.recognitionPref,
-              },
-            }
-          : u
-      );
-      newData = {
-        ...appData,
-        household: pendingHousehold || appData.household,
-        users: updatedUsers,
-        currentUserId: pendingUserId,
-      };
-    } else {
-      const user = {
-        id: uid(), name: profile.name, type: profile.type, pointBalance: 0,
-        relationships: {}, relationshipTags: {},
-        communicationProfile: {
-          tone: profile.tone, sensitivity: profile.sensitivity, forgetfulness: profile.forgetfulness,
-          undoneFeelings: profile.undoneFeelings, askStyle: profile.askStyle,
-          notifFrequency: profile.notifFrequency, recognitionPref: profile.recognitionPref,
-        },
-      };
-      newData = {
-        ...appData, household: pendingHousehold || appData.household,
-        users: [...(appData?.users || []), user], currentUserId: user.id,
-      };
-    }
+    setAppData(prev => {
+      let newData;
 
-    setAppData(newData);
-    await saveData(newData);
+      if (pendingUserId) {
+        const updatedUsers = prev.users.map((u) =>
+          u.id === pendingUserId
+            ? {
+                ...u,
+                name: profile.name,
+                type: "full",
+                status: "active",
+                inviteCode: null,
+                communicationProfile: {
+                  tone: profile.tone, sensitivity: profile.sensitivity, forgetfulness: profile.forgetfulness,
+                  undoneFeelings: profile.undoneFeelings, askStyle: profile.askStyle,
+                  notifFrequency: profile.notifFrequency, recognitionPref: profile.recognitionPref,
+                },
+              }
+            : u
+        );
+        newData = {
+          ...prev,
+          household: pendingHousehold || prev.household,
+          users: updatedUsers,
+          currentUserId: pendingUserId,
+        };
+      } else {
+        const user = {
+          id: newUserId, name: profile.name, type: profile.type, pointBalance: 0,
+          relationships: {}, relationshipTags: {},
+          communicationProfile: {
+            tone: profile.tone, sensitivity: profile.sensitivity, forgetfulness: profile.forgetfulness,
+            undoneFeelings: profile.undoneFeelings, askStyle: profile.askStyle,
+            notifFrequency: profile.notifFrequency, recognitionPref: profile.recognitionPref,
+          },
+        };
+        newData = {
+          ...prev, household: pendingHousehold || prev.household,
+          users: [...(prev?.users || []), user], currentUserId: user.id,
+        };
+      }
+
+      saveData(newData);
+      return newData;
+    });
+
     setPendingUserId(null);
     setScreen("dashboard");
   };
 
-  const handleAddMember = async (memberData) => {
+  // Phase 6.2: Uses functional updater to prevent race conditions
+  const handleAddMember = (memberData) => {
     const userId = uid();
 
     const newUserRels = {};
@@ -125,45 +133,55 @@ export default function App() {
       } : null),
     };
 
-    let updatedUsers = [...appData.users];
-    if (memberData.creatorRelationship) {
-      updatedUsers = updatedUsers.map((u) =>
-        u.id === appData.currentUserId
-          ? { ...u, relationships: { ...(u.relationships || {}), [userId]: memberData.creatorRelationship } }
-          : u
-      );
-    }
+    setAppData(prev => {
+      let updatedUsers = [...prev.users];
+      if (memberData.creatorRelationship) {
+        updatedUsers = updatedUsers.map((u) =>
+          u.id === prev.currentUserId
+            ? { ...u, relationships: { ...(u.relationships || {}), [userId]: memberData.creatorRelationship } }
+            : u
+        );
+      }
 
-    let notifications = [...(appData.notifications || [])];
-    for (const existing of appData.users) {
-      if (existing.id === appData.currentUserId) continue;
-      notifications.push({
-        id: uid(), type: "relationship", targetUserId: existing.id, fromUserId: appData.currentUserId,
-        rawMessage: `${memberData.name} has joined the household. Please update your relationship with them.`,
-        message: `${memberData.name} has joined the household. Please update your relationship with them.`,
-        read: false, timestamp: new Date().toISOString(), newMemberId: userId,
-      });
-    }
+      let notifications = [...(prev.notifications || [])];
+      for (const existing of prev.users) {
+        if (existing.id === prev.currentUserId) continue;
+        notifications.push(
+          createNotification("relationship", existing.id, prev.currentUserId,
+            `${memberData.name} has joined the household. Please update your relationship with them.`,
+            { newMemberId: userId })
+        );
+      }
 
-    const allUsers = [...updatedUsers, user].map((u) => ({ ...u, relationships: { ...(u.relationships || {}) } }));
-    const propagated = propagateRelationships(allUsers);
+      const allUsers = [...updatedUsers, user].map((u) => ({ ...u, relationships: { ...(u.relationships || {}) } }));
+      const propagated = propagateRelationships(allUsers);
 
-    const newData = { ...appData, users: propagated, notifications };
-    setAppData(newData);
-    await saveData(newData);
+      const newData = { ...prev, users: propagated, notifications };
+      saveData(newData);
+      return newData;
+    });
+
     if (memberData.type === "dependent") setScreen("dashboard");
   };
 
+  // Phase 6.2: Uses functional updater to prevent race conditions
   const handleTaskCreated = async (task) => {
-    let tasks = [...appData.tasks];
-    if (task._deleteTaskId) {
-      tasks = tasks.filter((t) => t.id !== task._deleteTaskId);
-      delete task._deleteTaskId;
-    }
-    const newData = { ...appData, tasks: [...tasks, task] };
-    setAppData(newData);
-    await saveData(newData);
+    // Build the task data before updating state
+    let taskToAdd = { ...task };
+    const deleteTaskId = task._deleteTaskId;
+    if (deleteTaskId) delete taskToAdd._deleteTaskId;
 
+    setAppData(prev => {
+      let tasks = [...prev.tasks];
+      if (deleteTaskId) {
+        tasks = tasks.filter((t) => t.id !== deleteTaskId);
+      }
+      const newData = { ...prev, tasks: [...tasks, taskToAdd] };
+      saveData(newData);
+      return newData;
+    });
+
+    // Side effects: send notification preview for assignees (reads closure for display data)
     const creator = appData.users.find((u) => u.id === appData.currentUserId);
     const assignees = (task.assignedTo || []).filter((id) => id !== appData.currentUserId);
     if (assignees.length > 0) {
@@ -187,10 +205,13 @@ export default function App() {
     setScreen("dashboard");
   };
 
-  const handleTaskEdited = async (updatedTask) => {
-    const newData = { ...appData, tasks: appData.tasks.map((t) => t.id === updatedTask.id ? updatedTask : t) };
-    setAppData(newData);
-    await saveData(newData);
+  // Phase 6.2: Uses functional updater to prevent race conditions
+  const handleTaskEdited = (updatedTask) => {
+    setAppData(prev => {
+      const newData = { ...prev, tasks: prev.tasks.map((t) => t.id === updatedTask.id ? updatedTask : t) };
+      saveData(newData);
+      return newData;
+    });
     setEditingTask(null);
     setScreen("dashboard");
   };
@@ -218,13 +239,16 @@ export default function App() {
     <ToastProvider>
       <GlobalStyles />
       {loggedIn && <TopNav userName={currentUserName} unreadCount={myUnreadCount}
-        onBellClick={async () => {
-          const updated = (appData.notifications || []).map((n) =>
-            n.targetUserId === appData.currentUserId ? { ...n, read: true } : n
-          );
-          const newData = { ...appData, notifications: updated };
-          setAppData(newData);
-          await saveData(newData);
+        onBellClick={() => {
+          // Phase 6.2: functional updater for marking notifications read
+          setAppData(prev => {
+            const updated = (prev.notifications || []).map((n) =>
+              n.targetUserId === prev.currentUserId ? { ...n, read: true } : n
+            );
+            const newData = { ...prev, notifications: updated };
+            saveData(newData);
+            return newData;
+          });
           setScreen("dashboard");
           setRequestedView("notifications");
         }}

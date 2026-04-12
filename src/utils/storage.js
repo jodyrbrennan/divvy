@@ -101,5 +101,5 @@ export function subscribeToChanges(onUpdate) {
   };
 }
 
-export const uid = () => Math.random().toString(36).slice(2, 10);
+export const uid = () => crypto.randomUUID();
 export const makeInviteCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();

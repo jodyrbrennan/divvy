@@ -49,7 +49,7 @@ export default function HoldOption({ children, selected, onHoldComplete, style }
       onMouseLeave={() => { setHovered(false); cancelHold(); }}
       onMouseDown={startHold}
       onMouseUp={cancelHold}
-      onTouchStart={(e) => { setHovered(true); startHold(); }}
+      onTouchStart={(e) => { e.preventDefault(); setHovered(true); startHold(); }}
       onTouchEnd={() => { setHovered(false); cancelHold(); }}
       onTouchCancel={() => { setHovered(false); cancelHold(); }}
       style={{

@@ -4,6 +4,7 @@ import { btnBase, btnGhost } from "../constants/styles";
 import { DAY_NAMES, DAY_NAMES_FULL, MONTH_NAMES } from "../utils/taskHelpers";
 import { isTaskActiveOnDate, getAssigneeForDate } from "../utils/calendarHelpers";
 import Card from "../components/Card";
+import { getUserName } from "../utils/userHelpers";
 import { CheckCircleIcon } from "../components/Icons";
 
 export default function CalendarView({ appData, onRequestComplete }) {
@@ -74,7 +75,6 @@ export default function CalendarView({ appData, onRequestComplete }) {
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
-  const getUserName = (id) => appData.users.find((u) => u.id === id)?.name || "Unassigned";
 
   return (
     <Card style={{ marginBottom: 20 }} delay={0.15}>
@@ -179,7 +179,7 @@ export default function CalendarView({ appData, onRequestComplete }) {
 
             {selectedTasks.map((task) => {
               const assignee = getAssigneeForDate(task, selectedDateObj, appData.users);
-              const allAssignees = task.assignedTo?.length ? task.assignedTo.map(getUserName).join(", ") : "Unassigned";
+              const allAssignees = task.assignedTo?.length ? task.assignedTo.map((id) => getUserName(appData.users, id)).join(", ") : "Unassigned";
               const displayAssignee = assignee ? assignee.name : allAssignees;
               const completed = task.lastCompleted && new Date(task.lastCompleted).toDateString() === selectedDateObj.toDateString();
               const isSelected = calSelectedTaskIds.includes(task.id);
