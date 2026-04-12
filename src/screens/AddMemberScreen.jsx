@@ -1,17 +1,45 @@
+/**
+ * AddMemberScreen.jsx — Where existing users invite new members.
+ *
+ * WHAT CHANGED:
+ * Previously: Enter new user's name → generate invite code → share code manually.
+ * Now: Enter new user's email → system sends invite email automatically.
+ *
+ * FLOW FOR ADDING A FULL USER:
+ * 1. Existing user taps "Add User"
+ * 2. Enters the new user's email address
+ * 3. Taps "Send Invite"
+ * 4. System sends an invite email to that address
+ * 5. System creates a pending invite record in the database
+ * 6. A notification is created for the existing user: "Invite sent!"
+ * 7. New user opens email → clicks link → lands on profile setup
+ *
+ * FLOW FOR ADDING A RESTRICTED USER:
+ * Same as before — no email needed since the parent manages their account.
+ */
+
 import { useState } from "react";
 import { C, font, fontDisplay } from "../constants/colors";
 import { btnPrimary, btnGhost, inputStyle, labelStyle } from "../constants/styles";
-import { makeInviteCode } from "../utils/storage";
 import { RECIPROCAL } from "../utils/relationships";
+import { sendInviteEmail } from "../utils/auth";
+import { createPendingInvite } from "../utils/storage";
+import { useAppData } from "../contexts/AppDataContext";
 import PageShell from "../components/PageShell";
 import Card from "../components/Card";
 import HoldOption from "../components/HoldOption";
 
 export default function AddMemberScreen({ onComplete, onBack }) {
+  const { appData, currentUser, currentUserId } = useAppData();
+
   const [mode, setMode] = useState("choose");
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [inviteSent, setInviteSent] = useState(false);
+
+  // Restricted user state (unchanged from before)
   const [name, setName] = useState("");
-  const [generatedCode, setGeneratedCode] = useState("");
-  const [copied, setCopied] = useState(false);
   const [rStep, setRStep] = useState(0);
   const [rGroupHovered, setRGroupHovered] = useState(false);
   const [rProfile, setRProfile] = useState({
@@ -21,19 +49,61 @@ export default function AddMemberScreen({ onComplete, onBack }) {
   });
   const rSet = (key) => (val) => setRProfile((p) => ({ ...p, [key]: val }));
 
-  const handleAddUser = () => {
-    if (!name.trim()) return;
-    const code = makeInviteCode();
-    setGeneratedCode(code);
-    onComplete({
-      name: name.trim(),
-      type: "full",
-      status: "pending",
-      inviteCode: code,
-    });
-    setMode("inviteResult");
+  // ─── Email Validation ──────────────────────────────────────────
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  // Check if this email is already in the household (by checking existing users)
+  const emailAlreadyInHousehold = appData.users.some(
+    (u) => u.email && u.email.toLowerCase() === email.trim().toLowerCase()
+  );
+
+  // ─── Send Invite ───────────────────────────────────────────────
+  const handleSendInvite = async () => {
+    setError("");
+
+    if (!isEmailValid) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
+    if (emailAlreadyInHousehold) {
+      setError("This email is already associated with a household member.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // Step 1: Send the invite email via our Edge Function
+      const { data, error: inviteError } = await sendInviteEmail(email.trim());
+
+      if (inviteError) {
+        setError(inviteError.message || "Failed to send invite. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      // Step 2: Create a pending invite record in the database
+      const inviterName = currentUser?.name || "Someone";
+      await createPendingInvite(email.trim(), currentUserId, inviterName);
+
+      // Step 3: Tell App.jsx about the invite (creates a notification for the inviter)
+      onComplete({
+        type: "invite",
+        email: email.trim().toLowerCase(),
+        invitedBy: currentUserId,
+      });
+
+      // Show success screen
+      setInviteSent(true);
+      setLoading(false);
+    } catch (e) {
+      setError("Something went wrong. Please try again.");
+      setLoading(false);
+    }
   };
 
+  // ─── Restricted User Handlers (same as before) ─────────────────
   const handleAddRestricted = () => {
     if (!name.trim()) return;
     setRStep(0);
@@ -54,20 +124,17 @@ export default function AddMemberScreen({ onComplete, onBack }) {
     });
   };
 
-  const copyCode = () => {
-    navigator.clipboard.writeText(generatedCode).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   return (
     <PageShell narrow topNav>
-      {mode !== "inviteResult" && mode !== "restrictedSetup" && (
+      {mode !== "inviteResult" && mode !== "restrictedSetup" && !inviteSent && (
         <button onClick={mode === "choose" ? onBack : () => setMode("choose")} style={btnGhost}>
           &larr; {mode === "choose" ? "Back" : "Back to options"}
         </button>
       )}
 
+      {/* ════════════════════════════════════════════════════════════ */}
+      {/* CHOOSE MEMBER TYPE                                         */}
+      {/* ════════════════════════════════════════════════════════════ */}
       {mode === "choose" && (
         <>
           <h2 style={{ fontFamily: fontDisplay, fontSize: 28, fontWeight: 500, margin: "20px 0 8px" }}>
@@ -81,39 +148,147 @@ export default function AddMemberScreen({ onComplete, onBack }) {
             <HoldOption selected={false} onHoldComplete={() => setMode("user")}>
               <p style={{ fontWeight: 600, fontSize: 16, color: C.dark, marginBottom: 4 }}>Add User</p>
               <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.5 }}>
-                A member with their own login access. They'll set up their own profile and preferences. Use this for your spouse, older children with their own phone, or roommates.
+                A member with their own account. They'll receive an email invitation to join 
+                and set up their own profile. Use this for your spouse, older children, or roommates.
               </p>
             </HoldOption>
             <HoldOption selected={false} onHoldComplete={() => setMode("restricted")}>
               <p style={{ fontWeight: 600, fontSize: 16, color: C.dark, marginBottom: 4 }}>Add Restricted User</p>
               <p style={{ fontSize: 13, color: C.steel, lineHeight: 1.5 }}>
-                A member without their own login. You'll manage their tasks, points, and rewards from your account. Use this for young children or anyone who doesn't need app access.
+                A member without their own login. You'll manage their tasks, points, and rewards 
+                from your account. Use this for young children or anyone who doesn't need app access.
               </p>
             </HoldOption>
           </div>
         </>
       )}
 
-      {mode === "user" && (
+      {/* ════════════════════════════════════════════════════════════ */}
+      {/* ADD USER — ENTER EMAIL                                     */}
+      {/* ════════════════════════════════════════════════════════════ */}
+      {mode === "user" && !inviteSent && (
         <>
           <h2 style={{ fontFamily: fontDisplay, fontSize: 28, fontWeight: 500, margin: "20px 0 8px" }}>
-            Add a new user
+            Invite a new member
           </h2>
           <p style={{ color: C.steel, fontSize: 15, lineHeight: 1.55, marginBottom: 32 }}>
-            They'll receive an invite code to join the household and set up their own profile.
+            Enter their email address and we'll send them an invitation to join 
+            your household. They'll set up their own name and profile.
           </p>
           <Card>
-            <label style={labelStyle}>Their name</label>
-            <input style={inputStyle} placeholder="First name" value={name}
-              onChange={(e) => setName(e.target.value)} autoFocus />
-            <button onClick={handleAddUser} disabled={!name.trim()}
-              style={{ ...btnPrimary, width: "100%", marginTop: 22, opacity: name.trim() ? 1 : 0.45 }}>
-              Add Member
+            <label style={labelStyle}>Their email address</label>
+            <input
+              type="email"
+              style={inputStyle}
+              placeholder="name@example.com"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); setError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && isEmailValid && !loading && handleSendInvite()}
+              autoFocus
+              autoComplete="email"
+            />
+
+            {/* Inline validation feedback */}
+            {email && !isEmailValid && (
+              <p style={{ fontSize: 12, color: C.steel, marginTop: 6 }}>
+                Please enter a valid email address
+              </p>
+            )}
+            {emailAlreadyInHousehold && (
+              <p style={{ fontSize: 12, color: C.danger, marginTop: 6 }}>
+                This email is already in your household
+              </p>
+            )}
+
+            {/* Error message */}
+            {error && (
+              <p style={{ color: C.danger, fontSize: 14, marginTop: 12 }}>{error}</p>
+            )}
+
+            <button
+              onClick={handleSendInvite}
+              disabled={!isEmailValid || loading || emailAlreadyInHousehold}
+              style={{
+                ...btnPrimary, width: "100%", marginTop: 22,
+                opacity: isEmailValid && !loading && !emailAlreadyInHousehold ? 1 : 0.45,
+              }}
+            >
+              {loading ? "Sending invite…" : "Send Invite"}
             </button>
           </Card>
         </>
       )}
 
+      {/* ════════════════════════════════════════════════════════════ */}
+      {/* INVITE SENT — SUCCESS SCREEN                               */}
+      {/* ════════════════════════════════════════════════════════════ */}
+      {inviteSent && (
+        <>
+          <div style={{ textAlign: "center", marginTop: 20 }}>
+            {/* Success icon */}
+            <div style={{
+              width: 72, height: 72, borderRadius: "50%",
+              background: C.ice, margin: "0 auto 20px",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              animation: "fadeUp 0.5s ease both",
+            }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none"
+                stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="3" />
+                <path d="M22 7l-10 6L2 7" />
+              </svg>
+            </div>
+          </div>
+
+          <h2 style={{
+            fontFamily: fontDisplay, fontSize: 28, fontWeight: 500,
+            margin: "0 0 8px", textAlign: "center",
+            animation: "fadeUp 0.5s ease 0.1s both",
+          }}>
+            Invite sent!
+          </h2>
+          <p style={{
+            color: C.steel, fontSize: 15, lineHeight: 1.55, marginBottom: 24,
+            textAlign: "center", animation: "fadeUp 0.5s ease 0.15s both",
+          }}>
+            We sent an invitation email to:
+          </p>
+          <p style={{
+            fontWeight: 700, fontSize: 17, color: C.dark, marginBottom: 24,
+            textAlign: "center", animation: "fadeUp 0.5s ease 0.2s both",
+          }}>
+            {email}
+          </p>
+
+          <Card style={{ animation: "fadeUp 0.5s ease 0.25s both" }}>
+            <p style={{ ...labelStyle, marginBottom: 12 }}>What happens next</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {[
+                "They'll receive an email with a link to join your household",
+                "When they click the link, they'll be taken to set up their profile",
+                "You'll get a notification when they've joined",
+              ].map((text, i) => (
+                <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: "50%", background: C.gradientPrimary,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    color: C.white, fontWeight: 700, fontSize: 13, flexShrink: 0,
+                  }}>{i + 1}</div>
+                  <p style={{ fontSize: 14, color: C.dark, lineHeight: 1.5 }}>{text}</p>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <button onClick={onBack} style={{ ...btnPrimary, width: "100%", marginTop: 20 }}>
+            Back to dashboard
+          </button>
+        </>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════ */}
+      {/* ADD RESTRICTED USER — NAME ENTRY (unchanged)               */}
+      {/* ════════════════════════════════════════════════════════════ */}
       {mode === "restricted" && (
         <>
           <h2 style={{ fontFamily: fontDisplay, fontSize: 28, fontWeight: 500, margin: "20px 0 8px" }}>
@@ -134,6 +309,9 @@ export default function AddMemberScreen({ onComplete, onBack }) {
         </>
       )}
 
+      {/* ════════════════════════════════════════════════════════════ */}
+      {/* RESTRICTED USER — PROFILE SETUP WIZARD (unchanged)         */}
+      {/* ════════════════════════════════════════════════════════════ */}
       {mode === "restrictedSetup" && (() => {
         const TOTAL = 8;
         const rStepDefs = [
@@ -261,53 +439,6 @@ export default function AddMemberScreen({ onComplete, onBack }) {
           </>
         );
       })()}
-
-      {mode === "inviteResult" && (
-        <>
-          <h2 style={{ fontFamily: fontDisplay, fontSize: 28, fontWeight: 500, margin: "20px 0 8px" }}>
-            {name} has been added
-          </h2>
-          <p style={{ color: C.steel, fontSize: 15, lineHeight: 1.55, marginBottom: 32 }}>
-            Share the invite code and instructions below so they can join the household and finish setting up their profile.
-          </p>
-          <Card style={{ textAlign: "center", marginBottom: 16 }}>
-            <p style={{ ...labelStyle, marginBottom: 14 }}>Invite code for {name}</p>
-            <div onClick={copyCode} style={{
-              fontSize: 36, fontWeight: 700, letterSpacing: "0.25em", fontFamily: font, color: C.dark,
-              background: C.gradientSubtle, border: `1.5px solid ${C.borderLight}`, borderRadius: 14,
-              padding: "20px 28px", cursor: "pointer", userSelect: "all", marginBottom: 8,
-              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.8)",
-            }}>
-              {generatedCode}
-            </div>
-            <p style={{ fontSize: 13, color: C.steel, marginBottom: 20 }}>
-              {copied ? "Copied to clipboard" : "Tap to copy"}
-            </p>
-          </Card>
-          <Card style={{ marginBottom: 16 }}>
-            <p style={{ ...labelStyle, marginBottom: 12 }}>Instructions for {name}</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {[
-                `Open the Divvy app and tap "Join an existing household"`,
-                <>Enter the invite code: <span style={{ fontWeight: 700, letterSpacing: "0.08em" }}>{generatedCode}</span></>,
-                "Follow the prompts to set up their profile and communication preferences",
-              ].map((text, i) => (
-                <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: "50%", background: C.gradientPrimary,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    color: C.white, fontWeight: 700, fontSize: 13, flexShrink: 0,
-                  }}>{i + 1}</div>
-                  <p style={{ fontSize: 14, color: C.dark, lineHeight: 1.5 }}>{text}</p>
-                </div>
-              ))}
-            </div>
-          </Card>
-          <button onClick={onBack} style={{ ...btnPrimary, width: "100%" }}>
-            Back to dashboard
-          </button>
-        </>
-      )}
     </PageShell>
   );
 }
