@@ -1,12 +1,10 @@
 /**
  * App.jsx — Main application shell with authentication.
  *
- * SCREEN FLOW:
- *   Not signed in → WelcomeScreen → SignUpScreen or SignInScreen
- *   Signed up → VerifyEmailScreen → (click email link) → CreateHouseholdScreen → ProfileSetupScreen → Dashboard
- *   Invited user → (click email link) → ProfileSetupScreen → Dashboard
- *   Returning user → SignInScreen → Dashboard
- *   Forgot password → ForgotPasswordScreen → (click email link) → ResetPasswordScreen → Dashboard
+ * DEV BYPASS:
+ * Sign up with any email containing "dev" (e.g. dev@test.com) and the app
+ * skips Supabase auth entirely — no real account created, no email sent.
+ * Goes straight to Create Household → Profile Setup → Dashboard.
  */
 
 import { useState, useEffect, useRef } from "react";
@@ -25,15 +23,12 @@ import TopNav from "./components/TopNav";
 import PageShell from "./components/PageShell";
 import Logo from "./components/Logo";
 
-// Auth screens
 import WelcomeScreen from "./screens/WelcomeScreen";
 import SignUpScreen from "./screens/SignUpScreen";
 import SignInScreen from "./screens/SignInScreen";
 import VerifyEmailScreen from "./screens/VerifyEmailScreen";
 import ForgotPasswordScreen from "./screens/ForgotPasswordScreen";
 import ResetPasswordScreen from "./screens/ResetPasswordScreen";
-
-// Existing screens
 import CreateHouseholdScreen from "./screens/CreateHouseholdScreen";
 import JoinHouseholdScreen from "./screens/JoinHouseholdScreen";
 import InviteCodeScreen from "./screens/InviteCodeScreen";
@@ -56,6 +51,11 @@ export default function App() {
   const [verifyEmail, setVerifyEmail] = useState("");
   const [pendingInvite, setPendingInvite] = useState(null);
   const [authRouted, setAuthRouted] = useState(false);
+
+  // ─── DEV BYPASS state ──────────────────────────────────────────
+  // When set, the app acts as if this email is authenticated.
+  // No real Supabase session exists — this is purely local.
+  const [devEmail, setDevEmail] = useState(null);
 
   const appDataRef = useRef(appData);
   useEffect(() => { appDataRef.current = appData; }, [appData]);
@@ -84,6 +84,8 @@ export default function App() {
   useEffect(() => {
     if (authLoading || !appData) return;
     if (authRouted) return;
+    // Don't auto-route if dev bypass is active (dev user is already routed)
+    if (devEmail) return;
 
     if (!authSession) {
       if (screen === "loading" || screen === "signIn" || screen === "signUp") {
@@ -95,7 +97,6 @@ export default function App() {
     const email = authSession.user?.email?.toLowerCase().trim();
     if (!email) return;
 
-    // Case 1: Returning user with matching email → dashboard
     const existingUser = appData.users.find(
       (u) => u.email && u.email.toLowerCase() === email && u.status === "active"
     );
@@ -106,12 +107,10 @@ export default function App() {
       return;
     }
 
-    // Case 2: MIGRATION — existing user without email stored yet
     const localUserId = localStorage.getItem("divvy-current-user");
     if (localUserId) {
       const localUser = appData.users.find((u) => u.id === localUserId && u.status === "active" && !u.email);
       if (localUser) {
-        console.log("Migration: attaching email", email, "to existing user", localUser.name);
         setAppData((prev) => {
           const updatedUsers = prev.users.map((u) => u.id === localUserId ? { ...u, email } : u);
           const newData = { ...prev, users: updatedUsers, currentUserId: localUserId };
@@ -124,7 +123,6 @@ export default function App() {
       }
     }
 
-    // Case 3: Invited user — check for pending invite by email
     (async () => {
       try {
         const { data: invite } = await findPendingInviteByEmail(email);
@@ -145,15 +143,26 @@ export default function App() {
       } catch (e) {
         console.log("No pending invite found for", email);
       }
-
-      // Case 4: Brand new user, no invite — always go to Create Household.
-      // In the new email-based system, joining an existing household only
-      // happens through email invites (handled automatically in Case 3).
-      // There is no manual invite code entry for new users.
       setAuthRouted(true);
       setScreen("createHousehold");
     })();
-  }, [authSession, appData, authLoading, authRouted]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authSession, appData, authLoading, authRouted, devEmail]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── DEV BYPASS Handler ────────────────────────────────────────
+  // Called from SignUpScreen when email contains "dev".
+  // Skips Supabase entirely and goes straight to Create Household.
+  const handleDevBypass = (email) => {
+    console.log("DEV BYPASS activated for:", email);
+    setDevEmail(email.toLowerCase().trim());
+    setAuthRouted(true);    // Prevent the auth routing useEffect from interfering
+    setScreen("createHousehold");
+  };
+
+  // ─── Helper: get the current user's email ──────────────────────
+  // Returns the real auth email OR the dev bypass email.
+  const getCurrentEmail = () => {
+    return authSession?.user?.email?.toLowerCase().trim() || devEmail || null;
+  };
 
   // ─── Handlers ──────────────────────────────────────────────────
 
@@ -163,7 +172,7 @@ export default function App() {
 
   const handleProfileComplete = async (profile) => {
     const newUserId = pendingUserId || uid();
-    const email = authSession?.user?.email?.toLowerCase().trim() || null;
+    const email = getCurrentEmail();  // Uses real auth OR dev bypass email
 
     setAppData((prev) => {
       let newData;
@@ -273,7 +282,12 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
-    await authSignOut();
+    // Clear dev bypass if active
+    if (devEmail) {
+      setDevEmail(null);
+    } else {
+      await authSignOut();
+    }
     localStorage.removeItem("divvy-current-user");
     setAppData((prev) => ({ ...prev, currentUserId: null }));
     setAuthSession(null);
@@ -308,7 +322,11 @@ export default function App() {
         />}
 
         {screen === "welcome" && <WelcomeScreen onSignUp={() => setScreen("signUp")} onSignIn={() => setScreen("signIn")} />}
-        {screen === "signUp" && <SignUpScreen onSignUpSuccess={(email) => { setVerifyEmail(email); setScreen("verifyEmail"); }} onBack={() => setScreen("welcome")} />}
+        {screen === "signUp" && <SignUpScreen
+          onSignUpSuccess={(email) => { setVerifyEmail(email); setScreen("verifyEmail"); }}
+          onDevBypass={handleDevBypass}
+          onBack={() => setScreen("welcome")}
+        />}
         {screen === "signIn" && <SignInScreen onBack={() => setScreen("welcome")} onForgotPassword={() => setScreen("forgotPassword")} />}
         {screen === "verifyEmail" && <VerifyEmailScreen email={verifyEmail} onBackToSignIn={() => setScreen("signIn")} />}
         {screen === "forgotPassword" && <ForgotPasswordScreen onBack={() => setScreen("signIn")} />}
