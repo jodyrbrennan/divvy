@@ -1,10 +1,13 @@
 /**
  * App.jsx — Main application shell with authentication.
  *
- * DEV BYPASS:
- * Sign up with any email containing "dev" (e.g. dev@test.com) and the app
- * skips Supabase auth entirely — no real account created, no email sent.
- * Goes straight to Create Household → Profile Setup → Dashboard.
+ * EMAIL_AUTH_ENABLED (in auth.js) controls the auth mode:
+ *   false → No Supabase auth. Sign-up goes straight to Create Household.
+ *           Sign-in matches email locally against existing users.
+ *   true  → Full Supabase Auth with email confirmation, invites, etc.
+ *
+ * To re-enable email auth later, just change EMAIL_AUTH_ENABLED to true
+ * in src/utils/auth.js and set up SMTP in Supabase Dashboard.
  */
 
 import { useState, useEffect, useRef } from "react";
@@ -13,7 +16,7 @@ import { loadData, saveData, uid, subscribeToChanges, findPendingInviteByEmail, 
 import { createNotification } from "./utils/notificationHelpers";
 import { rewriteForUser } from "./utils/communication";
 import { propagateRelationships } from "./utils/relationships";
-import { getSession, onAuthChange, signOut as authSignOut } from "./utils/auth";
+import { getSession, onAuthChange, signOut as authSignOut, EMAIL_AUTH_ENABLED } from "./utils/auth";
 
 import { AppDataProvider } from "./contexts/AppDataContext";
 
@@ -47,19 +50,19 @@ export default function App() {
   const [pendingUserId, setPendingUserId] = useState(null);
 
   const [authSession, setAuthSession] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  // When email auth is disabled, skip the loading wait for Supabase
+  const [authLoading, setAuthLoading] = useState(EMAIL_AUTH_ENABLED);
   const [verifyEmail, setVerifyEmail] = useState("");
   const [pendingInvite, setPendingInvite] = useState(null);
   const [authRouted, setAuthRouted] = useState(false);
 
-  // ─── DEV BYPASS state ──────────────────────────────────────────
-  // When set, the app acts as if this email is authenticated.
-  // No real Supabase session exists — this is purely local.
+  // Dev / no-email bypass: stores the email used during sign-up
   const [devEmail, setDevEmail] = useState(null);
 
   const appDataRef = useRef(appData);
   useEffect(() => { appDataRef.current = appData; }, [appData]);
 
+  // ─── Load App Data ─────────────────────────────────────────────
   useEffect(() => { loadData().then((data) => { setAppData(data); }); }, []);
 
   useEffect(() => {
@@ -67,7 +70,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // ─── Supabase Auth Listener (only when email auth is enabled) ──
   useEffect(() => {
+    if (!EMAIL_AUTH_ENABLED) return; // Skip Supabase auth entirely
+
     getSession().then((session) => { setAuthSession(session); setAuthLoading(false); });
     const unsubscribe = onAuthChange((event, session) => {
       console.log("Auth event:", event, session?.user?.email);
@@ -80,46 +86,51 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // ─── Auth Routing Logic ────────────────────────────────────────
+  // ─── Initial screen when email auth is DISABLED ────────────────
+  // Just wait for appData to load, then go to welcome.
   useEffect(() => {
+    if (EMAIL_AUTH_ENABLED) return; // Handled by the auth routing below
+    if (!appData) return;
+
+    // Check if there's a logged-in user from localStorage
+    if (appData.currentUserId) {
+      const existingUser = appData.users.find((u) => u.id === appData.currentUserId && u.status === "active");
+      if (existingUser) {
+        if (screen === "loading") setScreen("dashboard");
+        return;
+      }
+    }
+    if (screen === "loading") setScreen("welcome");
+  }, [appData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Auth Routing Logic (only when email auth is enabled) ──────
+  useEffect(() => {
+    if (!EMAIL_AUTH_ENABLED) return; // Skip when email auth is disabled
     if (authLoading || !appData) return;
     if (authRouted) return;
-    // Don't auto-route if dev bypass is active (dev user is already routed)
     if (devEmail) return;
 
     if (!authSession) {
-      if (screen === "loading" || screen === "signIn" || screen === "signUp") {
-        setScreen("welcome");
-      }
+      if (screen === "loading" || screen === "signIn" || screen === "signUp") { setScreen("welcome"); }
       return;
     }
 
     const email = authSession.user?.email?.toLowerCase().trim();
     if (!email) return;
 
-    const existingUser = appData.users.find(
-      (u) => u.email && u.email.toLowerCase() === email && u.status === "active"
-    );
+    const existingUser = appData.users.find((u) => u.email && u.email.toLowerCase() === email && u.status === "active");
     if (existingUser) {
       setAppData((prev) => { const newData = { ...prev, currentUserId: existingUser.id }; saveData(newData); return newData; });
-      setAuthRouted(true);
-      setScreen("dashboard");
-      return;
+      setAuthRouted(true); setScreen("dashboard"); return;
     }
 
     const localUserId = localStorage.getItem("divvy-current-user");
     if (localUserId) {
       const localUser = appData.users.find((u) => u.id === localUserId && u.status === "active" && !u.email);
       if (localUser) {
-        setAppData((prev) => {
-          const updatedUsers = prev.users.map((u) => u.id === localUserId ? { ...u, email } : u);
-          const newData = { ...prev, users: updatedUsers, currentUserId: localUserId };
-          saveData(newData);
-          return newData;
-        });
-        setAuthRouted(true);
-        setScreen("dashboard");
-        return;
+        setAppData((prev) => { const updatedUsers = prev.users.map((u) => u.id === localUserId ? { ...u, email } : u);
+          const newData = { ...prev, users: updatedUsers, currentUserId: localUserId }; saveData(newData); return newData; });
+        setAuthRouted(true); setScreen("dashboard"); return;
       }
     }
 
@@ -129,37 +140,40 @@ export default function App() {
         if (invite) {
           await updatePendingInviteStatus(invite.id, "accepted");
           setPendingInvite(invite);
-          setAppData((prev) => {
-            const notification = createNotification("invite_accepted", invite.invited_by_user_id, "system",
-              `${email} has accepted your invitation and is setting up their profile.`, { email });
-            const newData = { ...prev, notifications: [...(prev.notifications || []), notification] };
-            saveData(newData);
-            return newData;
-          });
-          setAuthRouted(true);
-          setScreen("profileSetup");
-          return;
+          setAppData((prev) => { const notification = createNotification("invite_accepted", invite.invited_by_user_id, "system",
+            `${email} has accepted your invitation and is setting up their profile.`, { email });
+            const newData = { ...prev, notifications: [...(prev.notifications || []), notification] }; saveData(newData); return newData; });
+          setAuthRouted(true); setScreen("profileSetup"); return;
         }
-      } catch (e) {
-        console.log("No pending invite found for", email);
-      }
+      } catch (e) { console.log("No pending invite found for", email); }
       setAuthRouted(true);
       setScreen("createHousehold");
     })();
   }, [authSession, appData, authLoading, authRouted, devEmail]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── DEV BYPASS Handler ────────────────────────────────────────
-  // Called from SignUpScreen when email contains "dev".
-  // Skips Supabase entirely and goes straight to Create Household.
+  // ─── Dev / No-Email Bypass ─────────────────────────────────────
   const handleDevBypass = (email) => {
-    console.log("DEV BYPASS activated for:", email);
+    console.log("Bypass activated for:", email);
     setDevEmail(email.toLowerCase().trim());
-    setAuthRouted(true);    // Prevent the auth routing useEffect from interfering
+    setAuthRouted(true);
     setScreen("createHousehold");
   };
 
+  // ─── Direct Sign-In (no-email mode) ───────────────────────────
+  // Called by SignInScreen when EMAIL_AUTH_ENABLED is false.
+  // Receives the matching user object and logs them in directly.
+  const handleDirectSignIn = (user) => {
+    console.log("Direct sign-in for:", user.name, user.email);
+    setDevEmail(user.email || "local");
+    setAppData((prev) => {
+      const newData = { ...prev, currentUserId: user.id };
+      saveData(newData);
+      return newData;
+    });
+    setScreen("dashboard");
+  };
+
   // ─── Helper: get the current user's email ──────────────────────
-  // Returns the real auth email OR the dev bypass email.
   const getCurrentEmail = () => {
     return authSession?.user?.email?.toLowerCase().trim() || devEmail || null;
   };
@@ -167,12 +181,11 @@ export default function App() {
   // ─── Handlers ──────────────────────────────────────────────────
 
   const handleHouseholdCreated = (household) => { setPendingHousehold(household); setScreen("profileSetup"); };
-
   const handleJoined = (result) => { setPendingHousehold(result.household); setPendingUserId(result.pendingUser?.id || null); setScreen("profileSetup"); };
 
   const handleProfileComplete = async (profile) => {
     const newUserId = pendingUserId || uid();
-    const email = getCurrentEmail();  // Uses real auth OR dev bypass email
+    const email = getCurrentEmail();
 
     setAppData((prev) => {
       let newData;
@@ -202,8 +215,7 @@ export default function App() {
         const relationshipNotifs = prev.users.filter((u) => u.id !== newUserId && u.status !== "pending").map((existing) =>
           createNotification("relationship", existing.id, "system", `${profile.name} has joined the household. Please update your relationship with them.`, { newMemberId: newUserId }));
         const newData = { ...prev, notifications: [...(prev.notifications || []), notification, ...relationshipNotifs] };
-        saveData(newData);
-        return newData;
+        saveData(newData); return newData;
       });
       setPendingInvite(null);
     }
@@ -213,17 +225,11 @@ export default function App() {
 
   const handleAddMember = (memberData) => {
     if (memberData.type === "invite") {
-      setAppData((prev) => {
-        const notification = createNotification("invite_sent", prev.currentUserId, "system",
-          `Invitation email sent to ${memberData.email} successfully.`, { email: memberData.email });
-        const newData = { ...prev, notifications: [...(prev.notifications || []), notification] };
-        saveData(newData);
-        return newData;
-      });
-      setScreen("dashboard");
-      return;
+      setAppData((prev) => { const notification = createNotification("invite_sent", prev.currentUserId, "system",
+        `Invitation email sent to ${memberData.email} successfully.`, { email: memberData.email });
+        const newData = { ...prev, notifications: [...(prev.notifications || []), notification] }; saveData(newData); return newData; });
+      setScreen("dashboard"); return;
     }
-
     const userId = uid();
     const newUserRels = {};
     if (memberData.relationships) { for (const [key, val] of Object.entries(memberData.relationships)) { if (key === "__creator__") newUserRels[appData.currentUserId] = val; else newUserRels[key] = val; } }
@@ -231,7 +237,6 @@ export default function App() {
       managedBy: memberData.type === "dependent" ? appData.currentUserId : null, inviteCode: memberData.inviteCode || null,
       relationships: newUserRels, relationshipTags: {},
       communicationProfile: memberData.communicationProfile || (memberData.type === "dependent" ? { tone: "casual", sensitivity: "low", forgetfulness: "sometimes", undoneFeelings: "unbothered", askStyle: "direct", notifFrequency: "moderate", recognitionPref: "public" } : null) };
-
     setAppData((prev) => {
       let updatedUsers = [...prev.users];
       if (memberData.creatorRelationship) { updatedUsers = updatedUsers.map((u) => u.id === prev.currentUserId ? { ...u, relationships: { ...(u.relationships || {}), [userId]: memberData.creatorRelationship } } : u); }
@@ -240,37 +245,29 @@ export default function App() {
         notifications.push(createNotification("relationship", existing.id, prev.currentUserId, `${memberData.name} has joined the household. Please update your relationship with them.`, { newMemberId: userId })); }
       const allUsers = [...updatedUsers, user].map((u) => ({ ...u, relationships: { ...(u.relationships || {}) } }));
       const propagated = propagateRelationships(allUsers);
-      const newData = { ...prev, users: propagated, notifications };
-      saveData(newData);
-      return newData;
+      const newData = { ...prev, users: propagated, notifications }; saveData(newData); return newData;
     });
     if (memberData.type === "dependent") setScreen("dashboard");
   };
 
   const handleTaskCreated = async (task) => {
-    let taskToAdd = { ...task };
-    const deleteTaskId = task._deleteTaskId;
-    if (deleteTaskId) delete taskToAdd._deleteTaskId;
+    let taskToAdd = { ...task }; const deleteTaskId = task._deleteTaskId; if (deleteTaskId) delete taskToAdd._deleteTaskId;
     setAppData((prev) => { let tasks = [...prev.tasks]; if (deleteTaskId) { tasks = tasks.filter((t) => t.id !== deleteTaskId); } const newData = { ...prev, tasks: [...tasks, taskToAdd] }; saveData(newData); return newData; });
     const creator = appData.users.find((u) => u.id === appData.currentUserId);
     const assignees = (task.assignedTo || []).filter((id) => id !== appData.currentUserId);
     if (assignees.length > 0) {
       const recipient = appData.users.find((u) => u.id === assignees[0]);
-      if (recipient) {
-        const creatorTags = creator?.relationshipTags || {};
-        const tag = creatorTags[recipient.id] || creator?.name || "Someone";
+      if (recipient) { const creatorTags = creator?.relationshipTags || {}; const tag = creatorTags[recipient.id] || creator?.name || "Someone";
         const rawMsg = `${creator?.name || "Someone"} assigned you a new task: "${task.name}"${task.dueConfig?.date ? ` — due ${task.dueConfig.date}` : ""}`;
         const rewritten = await rewriteForUser(rawMsg, creator?.name || "Someone", recipient.communicationProfile, tag);
-        setPendingPreview({ recipientName: recipient.name, recipientId: recipient.id, original: rawMsg, rewritten, senderTag: tag, type: "task", meta: { taskId: task.id } });
-      }
+        setPendingPreview({ recipientName: recipient.name, recipientId: recipient.id, original: rawMsg, rewritten, senderTag: tag, type: "task", meta: { taskId: task.id } }); }
     }
     setScreen("dashboard");
   };
 
   const handleTaskEdited = (updatedTask) => {
     setAppData((prev) => { const newData = { ...prev, tasks: prev.tasks.map((t) => t.id === updatedTask.id ? updatedTask : t) }; saveData(newData); return newData; });
-    setEditingTask(null);
-    setScreen("dashboard");
+    setEditingTask(null); setScreen("dashboard");
   };
 
   const handlePasswordResetComplete = () => {
@@ -282,12 +279,8 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
-    // Clear dev bypass if active
-    if (devEmail) {
-      setDevEmail(null);
-    } else {
-      await authSignOut();
-    }
+    if (devEmail) { setDevEmail(null); }
+    else if (EMAIL_AUTH_ENABLED) { await authSignOut(); }
     localStorage.removeItem("divvy-current-user");
     setAppData((prev) => ({ ...prev, currentUserId: null }));
     setAuthSession(null);
@@ -296,7 +289,7 @@ export default function App() {
   };
 
   // ─── Loading Screen ────────────────────────────────────────────
-  if (screen === "loading" || !appData || authLoading) {
+  if (screen === "loading" || !appData) {
     return (<PageShell narrow><div style={{ textAlign: "center", marginTop: 140 }}><Logo size={44} />
       <div style={{ marginTop: 20, height: 3, width: 60, borderRadius: 2, margin: "20px auto 0",
         background: `linear-gradient(90deg, ${C.ice}, ${C.sky}, ${C.ice})`, backgroundSize: "200% 100%", animation: "shimmer 1.5s ease infinite" }} />
@@ -312,22 +305,15 @@ export default function App() {
       <GlobalStyles />
       <AppDataProvider appData={appData} setAppData={setAppData}>
         {loggedIn && <TopNav userName={currentUserName} unreadCount={myUnreadCount}
-          onBellClick={() => {
-            setAppData((prev) => { const updated = (prev.notifications || []).map((n) => n.targetUserId === prev.currentUserId ? { ...n, read: true } : n);
-              const newData = { ...prev, notifications: updated }; saveData(newData); return newData; });
-            setScreen("dashboard"); setRequestedView("notifications");
-          }}
+          onBellClick={() => { setAppData((prev) => { const updated = (prev.notifications || []).map((n) => n.targetUserId === prev.currentUserId ? { ...n, read: true } : n);
+            const newData = { ...prev, notifications: updated }; saveData(newData); return newData; }); setScreen("dashboard"); setRequestedView("notifications"); }}
           onSettings={() => { setScreen("dashboard"); setRequestedView("settings"); }}
           onSignOut={handleSignOut}
         />}
 
         {screen === "welcome" && <WelcomeScreen onSignUp={() => setScreen("signUp")} onSignIn={() => setScreen("signIn")} />}
-        {screen === "signUp" && <SignUpScreen
-          onSignUpSuccess={(email) => { setVerifyEmail(email); setScreen("verifyEmail"); }}
-          onDevBypass={handleDevBypass}
-          onBack={() => setScreen("welcome")}
-        />}
-        {screen === "signIn" && <SignInScreen onBack={() => setScreen("welcome")} onForgotPassword={() => setScreen("forgotPassword")} />}
+        {screen === "signUp" && <SignUpScreen onSignUpSuccess={(email) => { setVerifyEmail(email); setScreen("verifyEmail"); }} onDevBypass={handleDevBypass} onBack={() => setScreen("welcome")} />}
+        {screen === "signIn" && <SignInScreen onBack={() => setScreen("welcome")} onForgotPassword={() => setScreen("forgotPassword")} onDirectSignIn={handleDirectSignIn} />}
         {screen === "verifyEmail" && <VerifyEmailScreen email={verifyEmail} onBackToSignIn={() => setScreen("signIn")} />}
         {screen === "forgotPassword" && <ForgotPasswordScreen onBack={() => setScreen("signIn")} />}
         {screen === "resetPassword" && <ResetPasswordScreen onComplete={handlePasswordResetComplete} />}

@@ -1,16 +1,19 @@
 /**
  * SignUpScreen.jsx — Where new users create their account.
  *
- * DEV BYPASS:
- * If the email contains "dev" (e.g. dev@test.com), the screen skips
- * Supabase sign-up entirely and goes straight to household creation.
- * No real email is sent, no confirmation is needed.
+ * When EMAIL_AUTH_ENABLED is false:
+ *   All sign-ups bypass Supabase — no email sent, no verification needed.
+ *   Goes straight to Create Household → Profile Setup → Dashboard.
+ *
+ * When EMAIL_AUTH_ENABLED is true:
+ *   Normal Supabase sign-up with email confirmation.
+ *   Emails containing "dev" still get the dev bypass.
  */
 
 import { useState } from "react";
 import { C, fontDisplay } from "../constants/colors";
 import { btnPrimary, btnGhost, inputStyle, labelStyle } from "../constants/styles";
-import { signUp } from "../utils/auth";
+import { signUp, EMAIL_AUTH_ENABLED } from "../utils/auth";
 import PageShell from "../components/PageShell";
 import Card from "../components/Card";
 import Logo from "../components/Logo";
@@ -29,32 +32,22 @@ export default function SignUpScreen({ onSignUpSuccess, onDevBypass, onBack }) {
 
   const handleSignUp = async () => {
     setError("");
-
     if (!isEmailValid) { setError("Please enter a valid email address."); return; }
     if (!isPasswordValid) { setError("Password must be at least 6 characters."); return; }
     if (!passwordsMatch) { setError("Passwords don't match."); return; }
 
-    // ─── DEV BYPASS ────────────────────────────────────────────
-    // If the email contains "dev", skip Supabase entirely.
-    // No account is created, no email is sent.
-    // App.jsx will handle the rest and go straight to createHousehold.
-    if (email.toLowerCase().includes("dev")) {
-      console.log("DEV BYPASS: Skipping email verification for", email);
+    // ─── BYPASS when email auth is disabled OR email contains "dev" ──
+    if (!EMAIL_AUTH_ENABLED || email.toLowerCase().includes("dev")) {
+      console.log(EMAIL_AUTH_ENABLED ? "DEV BYPASS:" : "EMAIL AUTH DISABLED:", "Skipping email verification for", email);
       onDevBypass(email.trim());
       return;
     }
 
+    // ─── Normal Supabase sign-up (only when EMAIL_AUTH_ENABLED is true) ──
     setLoading(true);
-
     try {
       const { data, error: authError } = await signUp(email.trim(), password);
-
-      if (authError) {
-        setError(authError.message);
-        setLoading(false);
-        return;
-      }
-
+      if (authError) { setError(authError.message); setLoading(false); return; }
       onSignUpSuccess(email.trim());
     } catch (e) {
       setError("Something went wrong. Please try again.");
@@ -66,14 +59,13 @@ export default function SignUpScreen({ onSignUpSuccess, onDevBypass, onBack }) {
     <PageShell narrow>
       <button onClick={onBack} style={btnGhost}>&larr; Back</button>
       <div style={{ marginTop: 28 }}><Logo /></div>
-      <h2 style={{
-        fontFamily: fontDisplay, fontSize: 28, fontWeight: 500, margin: "20px 0 8px",
-      }}>
+      <h2 style={{ fontFamily: fontDisplay, fontSize: 28, fontWeight: 500, margin: "20px 0 8px" }}>
         Create your account
       </h2>
       <p style={{ color: C.steel, fontSize: 15, lineHeight: 1.55, marginBottom: 32 }}>
-        Enter your email and choose a password. We'll send you a confirmation
-        email to verify your address.
+        {EMAIL_AUTH_ENABLED
+          ? "Enter your email and choose a password. We'll send you a confirmation email to verify your address."
+          : "Enter your email and choose a password to get started."}
       </p>
 
       <Card>
