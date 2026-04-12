@@ -4,6 +4,10 @@ import { loadData, saveData, uid, subscribeToChanges } from "./utils/storage";
 import { createNotification } from "./utils/notificationHelpers";
 import { rewriteForUser } from "./utils/communication";
 import { propagateRelationships } from "./utils/relationships";
+
+// Phase 7.1: Import the context provider
+import { AppDataProvider } from "./contexts/AppDataContext";
+
 import GlobalStyles from "./components/GlobalStyles";
 import ToastProvider from "./components/Toast";
 import TopNav from "./components/TopNav";
@@ -238,47 +242,54 @@ export default function App() {
   return (
     <ToastProvider>
       <GlobalStyles />
-      {loggedIn && <TopNav userName={currentUserName} unreadCount={myUnreadCount}
-        onBellClick={() => {
-          // Phase 6.2: functional updater for marking notifications read
-          setAppData(prev => {
-            const updated = (prev.notifications || []).map((n) =>
-              n.targetUserId === prev.currentUserId ? { ...n, read: true } : n
-            );
-            const newData = { ...prev, notifications: updated };
-            saveData(newData);
-            return newData;
-          });
-          setScreen("dashboard");
-          setRequestedView("notifications");
-        }}
-        onSettings={() => {
-          setScreen("dashboard");
-          setRequestedView("settings");
-        }}
-        onSignOut={() => {
-          localStorage.removeItem('divvy-current-user');
-          setAppData({ ...appData, currentUserId: null });
-          setScreen("welcome");
-        }}
-      />}
-      {screen === "welcome" && <WelcomeScreen onCreateNew={() => setScreen("createHousehold")} onJoin={() => setScreen("joinHousehold")} />}
-      {screen === "createHousehold" && <CreateHouseholdScreen onCreated={handleHouseholdCreated} onBack={() => setScreen("welcome")} />}
-      {screen === "joinHousehold" && <JoinHouseholdScreen appData={appData} onJoined={handleJoined} onBack={() => setScreen("welcome")} />}
-      {screen === "inviteCode" && <InviteCodeScreen household={pendingHousehold} onContinue={() => setScreen("profileSetup")} />}
-      {screen === "profileSetup" && <ProfileSetupScreen onComplete={handleProfileComplete} householdName={pendingHousehold?.name || appData.household?.name || "your home"} />}
-      {screen === "dashboard" && <Dashboard appData={appData} setAppData={setAppData}
-        onAddMember={() => setScreen("addMember")}
-        onCreateTask={() => setScreen("createTask")}
-        onCreateReminder={() => setScreen("createReminder")}
-        onEditTask={(task) => { setEditingTask(task); setScreen("editTask"); }}
-        requestedView={requestedView} clearRequestedView={() => setRequestedView(null)}
-        pendingPreview={pendingPreview} clearPendingPreview={() => setPendingPreview(null)}
-      />}
-      {screen === "createTask" && <CreateTaskScreen onComplete={handleTaskCreated} onBack={() => setScreen("dashboard")} users={appData.users} currentUserId={appData.currentUserId} existingTasks={appData.tasks} />}
-      {screen === "editTask" && <CreateTaskScreen editingTask={editingTask} onComplete={handleTaskEdited} onBack={() => { setEditingTask(null); setScreen("dashboard"); }} users={appData.users} currentUserId={appData.currentUserId} existingTasks={appData.tasks} />}
-      {screen === "createReminder" && <CreateTaskScreen isReminder onComplete={handleTaskCreated} onBack={() => setScreen("dashboard")} users={appData.users} currentUserId={appData.currentUserId} existingTasks={appData.tasks} />}
-      {screen === "addMember" && <AddMemberScreen onComplete={handleAddMember} onBack={() => setScreen("dashboard")} />}
+      {/* Phase 7.1: Wrap everything in AppDataProvider so any component
+          can access appData via useAppData() instead of receiving props */}
+      <AppDataProvider appData={appData} setAppData={setAppData}>
+        {loggedIn && <TopNav userName={currentUserName} unreadCount={myUnreadCount}
+          onBellClick={() => {
+            // Phase 6.2: functional updater for marking notifications read
+            setAppData(prev => {
+              const updated = (prev.notifications || []).map((n) =>
+                n.targetUserId === prev.currentUserId ? { ...n, read: true } : n
+              );
+              const newData = { ...prev, notifications: updated };
+              saveData(newData);
+              return newData;
+            });
+            setScreen("dashboard");
+            setRequestedView("notifications");
+          }}
+          onSettings={() => {
+            setScreen("dashboard");
+            setRequestedView("settings");
+          }}
+          onSignOut={() => {
+            localStorage.removeItem('divvy-current-user');
+            setAppData({ ...appData, currentUserId: null });
+            setScreen("welcome");
+          }}
+        />}
+        {screen === "welcome" && <WelcomeScreen onCreateNew={() => setScreen("createHousehold")} onJoin={() => setScreen("joinHousehold")} />}
+        {screen === "createHousehold" && <CreateHouseholdScreen onCreated={handleHouseholdCreated} onBack={() => setScreen("welcome")} />}
+        {screen === "joinHousehold" && <JoinHouseholdScreen onJoined={handleJoined} onBack={() => setScreen("welcome")} />}
+        {screen === "inviteCode" && <InviteCodeScreen household={pendingHousehold} onContinue={() => setScreen("profileSetup")} />}
+        {screen === "profileSetup" && <ProfileSetupScreen onComplete={handleProfileComplete} householdName={pendingHousehold?.name || appData.household?.name || "your home"} />}
+        {/* Phase 7.1: Dashboard no longer receives appData/setAppData as props —
+            it pulls them from context. Only navigation callbacks remain as props. */}
+        {screen === "dashboard" && <Dashboard
+          onAddMember={() => setScreen("addMember")}
+          onCreateTask={() => setScreen("createTask")}
+          onCreateReminder={() => setScreen("createReminder")}
+          onEditTask={(task) => { setEditingTask(task); setScreen("editTask"); }}
+          requestedView={requestedView} clearRequestedView={() => setRequestedView(null)}
+          pendingPreview={pendingPreview} clearPendingPreview={() => setPendingPreview(null)}
+        />}
+        {/* Phase 7.1: CreateTaskScreen uses context for users/currentUserId/tasks */}
+        {screen === "createTask" && <CreateTaskScreen onComplete={handleTaskCreated} onBack={() => setScreen("dashboard")} />}
+        {screen === "editTask" && <CreateTaskScreen editingTask={editingTask} onComplete={handleTaskEdited} onBack={() => { setEditingTask(null); setScreen("dashboard"); }} />}
+        {screen === "createReminder" && <CreateTaskScreen isReminder onComplete={handleTaskCreated} onBack={() => setScreen("dashboard")} />}
+        {screen === "addMember" && <AddMemberScreen onComplete={handleAddMember} onBack={() => setScreen("dashboard")} />}
+      </AppDataProvider>
     </ToastProvider>
   );
 }

@@ -6,6 +6,9 @@ import { createNotification } from "../utils/notificationHelpers";
 import { rewriteForUser } from "../utils/communication";
 import { isTaskDueToday } from "../utils/taskHelpers";
 
+// Phase 7.1: Import the context hook instead of receiving props
+import { useAppData } from "../contexts/AppDataContext";
+
 import { useDebouncedSave } from "../utils/useDebouncedSave";
 import { useToast } from "../components/Toast";
 import PageShell from "../components/PageShell";
@@ -33,8 +36,12 @@ import SelectionBar from "../components/SelectionBar";
 
 
 // ─── Dashboard ─────────────────────────────────────────────────
-export default function Dashboard({ appData, setAppData, onAddMember, onCreateTask, onCreateReminder, onEditTask, requestedView, clearRequestedView, pendingPreview, clearPendingPreview }) {
-  const currentUser = appData.users.find((u) => u.id === appData.currentUserId);
+// Phase 7.1: Removed appData and setAppData from props — now pulled from context.
+// Only navigation callbacks and App-owned UI state remain as props.
+export default function Dashboard({ onAddMember, onCreateTask, onCreateReminder, onEditTask, requestedView, clearRequestedView, pendingPreview, clearPendingPreview }) {
+  // Phase 7.1: Pull data from context instead of props
+  const { appData, setAppData, currentUser, currentUserId } = useAppData();
+
   const [view, setView] = useState("hub");
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
   const [completionDialogTasks, setCompletionDialogTasks] = useState(null);
@@ -109,7 +116,7 @@ export default function Dashboard({ appData, setAppData, onAddMember, onCreateTa
     // Read display info from closure (safe — just for toast text)
     const task = appData.tasks.find((t) => t.id === taskId);
     if (!task) return;
-    const userId = completerId || appData.currentUserId;
+    const userId = completerId || currentUserId;
 
     setAppData(prev => {
       const newData = completeTasksCore(prev, [taskId], userId);
@@ -118,7 +125,7 @@ export default function Dashboard({ appData, setAppData, onAddMember, onCreateTa
       return newData;
     });
 
-    if (userId !== appData.currentUserId) {
+    if (userId !== currentUserId) {
       const name = appData.users.find((u) => u.id === userId)?.name;
       showToast(`Marked "${task.name}" complete for ${name}`);
     }
@@ -193,7 +200,7 @@ export default function Dashboard({ appData, setAppData, onAddMember, onCreateTa
 
   // Count missing relationships for current user
   const missingRelationships = appData.users.filter((u) => {
-    if (u.id === appData.currentUserId) return false;
+    if (u.id === currentUserId) return false;
     if (u.status === "pending") return false;
     const myRels = currentUser?.relationships || {};
     return !myRels[u.id];
@@ -254,7 +261,7 @@ export default function Dashboard({ appData, setAppData, onAddMember, onCreateTa
             max_tokens: 1000,
             system: `You are a voice command parser for a household task app called Divvy. Parse the user's voice command and return ONLY valid JSON with no markdown or backticks.
 
-Current user: ${currentUser?.name} (id: ${appData.currentUserId})
+Current user: ${currentUser?.name} (id: ${currentUserId})
 Household members: ${memberList}
 Today's date: ${new Date().toISOString().slice(0, 10)}
 
@@ -289,7 +296,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
       }
     };
     parse();
-  }, [voiceMode, voiceTranscript, appData.users, appData.currentUserId]);
+  }, [voiceMode, voiceTranscript, appData.users, currentUserId]);
 
   const executeVoiceCommand = () => {
     if (!voiceParsed) return;
@@ -304,20 +311,20 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
         tempConfig: null,
         dueConfig: p.dueDate ? { type: p.dueTime ? "datetime" : "date", date: p.dueDate, time: p.dueTime || "" } : { type: "none" },
         timeDue: p.dueTime || null,
-        assignedTo: p.targetUserId ? [p.targetUserId] : [appData.currentUserId],
+        assignedTo: p.targetUserId ? [p.targetUserId] : [currentUserId],
         assignMode: p.targetUserId || "me",
         rotation: null,
         points: p.points || 10,
         status: "assigned",
         lastCompleted: null,
-        createdAt: new Date().toISOString(), createdBy: appData.currentUserId,
+        createdAt: new Date().toISOString(), createdBy: currentUserId,
       };
       setAppData(prev => {
         const newData = { ...prev, tasks: [...prev.tasks, newTask] };
         saveData(newData);
         return newData;
       });
-      if (p.targetUserId && p.targetUserId !== appData.currentUserId) {
+      if (p.targetUserId && p.targetUserId !== currentUserId) {
         sendNotification(p.targetUserId, "task", `${currentUser?.name} assigned you a task: "${newTask.name}"${p.dueDate ? ` — due ${p.dueDate}` : ""}`, { taskId: newTask.id });
       }
       showToast(`Task created: "${newTask.name}" assigned to ${p.targetUserName || currentUser?.name}`);
@@ -325,7 +332,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
 
     if (p.type === "recognition" && p.targetUserId) {
       const recognition = {
-        id: uid(), fromUserId: appData.currentUserId, toUserId: p.targetUserId,
+        id: uid(), fromUserId: currentUserId, toUserId: p.targetUserId,
         message: p.recognitionMessage || p.description || p.title,
         pointsAwarded: p.points || 5,
         timestamp: new Date().toISOString(),
@@ -351,13 +358,13 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
         tempConfig: null,
         dueConfig: p.dueDate ? { type: p.dueTime ? "datetime" : "date", date: p.dueDate, time: p.dueTime || "" } : { type: "none" },
         timeDue: p.dueTime || null,
-        assignedTo: [appData.currentUserId],
+        assignedTo: [currentUserId],
         assignMode: "me",
         rotation: null,
         points: 0,
         status: "assigned",
         lastCompleted: null,
-        createdAt: new Date().toISOString(), createdBy: appData.currentUserId,
+        createdAt: new Date().toISOString(), createdBy: currentUserId,
         isReminder: true,
       };
       setAppData(prev => {
@@ -431,9 +438,9 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   const sendNotification = async (targetUserId, type, rawMessage, meta = {}) => {
     const sender = currentUser;
     const recipient = appData.users.find((u) => u.id === targetUserId);
-    if (!recipient || targetUserId === appData.currentUserId) return;
+    if (!recipient || targetUserId === currentUserId) return;
 
-    const tag = getSenderTag(appData.currentUserId, targetUserId);
+    const tag = getSenderTag(currentUserId, targetUserId);
     const rewritten = await rewriteForUser(rawMessage, sender?.name || "Someone", recipient.communicationProfile, tag);
 
     setPendingApproval({
@@ -454,7 +461,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
     const notification = {
       id: uid(), type: pendingApproval.type,
       targetUserId: pendingApproval.recipientId,
-      fromUserId: appData.currentUserId,
+      fromUserId: currentUserId,
       rawMessage: pendingApproval.original,
       message: approvedMessage,
       read: false, timestamp: new Date().toISOString(),
@@ -472,7 +479,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   const reRewriteForApproval = async (correctedText) => {
     if (!pendingApproval) return;
     const recipient = appData.users.find((u) => u.id === pendingApproval.recipientId);
-    const tag = getSenderTag(appData.currentUserId, pendingApproval.recipientId);
+    const tag = getSenderTag(currentUserId, pendingApproval.recipientId);
     const rewritten = await rewriteForUser(correctedText, currentUser?.name || "Someone", recipient?.communicationProfile, tag);
     setPendingApproval((p) => ({ ...p, original: correctedText, rewritten, editMode: false, editText: "" }));
   };
@@ -481,11 +488,11 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   const sendDirectNotification = async (targetUserId, type, rawMessage, meta = {}) => {
     const sender = currentUser;
     const recipient = appData.users.find((u) => u.id === targetUserId);
-    if (!recipient || targetUserId === appData.currentUserId) return;
-    const tag = getSenderTag(appData.currentUserId, targetUserId);
+    if (!recipient || targetUserId === currentUserId) return;
+    const tag = getSenderTag(currentUserId, targetUserId);
     const rewritten = await rewriteForUser(rawMessage, sender?.name || "Someone", recipient.communicationProfile, tag);
     const notification = {
-      id: uid(), type, targetUserId, fromUserId: appData.currentUserId,
+      id: uid(), type, targetUserId, fromUserId: currentUserId,
       rawMessage, message: rewritten, read: false,
       timestamp: new Date().toISOString(), ...meta,
     };
@@ -499,7 +506,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // System notification — sent from "Divvy" (the app), not a user
   const sendSystemNotification = async (targetUserId, type, rawMessage, meta = {}) => {
     const recipient = appData.users.find((u) => u.id === targetUserId);
-    if (!recipient || targetUserId === appData.currentUserId) return;
+    if (!recipient || targetUserId === currentUserId) return;
     const rewritten = await rewriteForUser(rawMessage, "Divvy", recipient.communicationProfile, "Divvy");
     const notification = {
       id: uid(), type, targetUserId, fromUserId: "system",
@@ -524,7 +531,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
     });
   };
 
-  const myUnreadCount = useMemo(() => (appData.notifications || []).filter((n) => n.targetUserId === appData.currentUserId && !n.read).length, [appData.notifications, appData.currentUserId]);
+  const myUnreadCount = useMemo(() => (appData.notifications || []).filter((n) => n.targetUserId === currentUserId && !n.read).length, [appData.notifications, currentUserId]);
 
   // TaskRow and SelectionBar — extracted to ../components/TaskRow.jsx and ../components/SelectionBar.jsx
   // Shared props helper objects for passing to extracted components:
@@ -590,7 +597,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
 
         {/* Missing relationships warning */}
         {missingRelationships.length > 0 && (
-          <button onClick={() => { setSelectedMemberId(appData.currentUserId); setView("memberDetail"); }} style={{
+          <button onClick={() => { setSelectedMemberId(currentUserId); setView("memberDetail"); }} style={{
             all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
             width: "100%", padding: "14px 18px", marginBottom: 16,
             borderRadius: 14, background: "rgba(170,199,216,0.15)",
@@ -702,7 +709,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
           <p style={{ fontSize: 10, fontWeight: 700, color: C.danger, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Dev — Switch User</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {appData.users.map((u) => {
-              const isActive = u.id === appData.currentUserId;
+              const isActive = u.id === currentUserId;
               return (
                 <button key={u.id} onClick={() => {
                   if (isActive) return;
@@ -739,9 +746,9 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   // MEMBERS VIEW
   // ════════════════════════════════════════════════════════════════
-  // MEMBERS — extracted to MembersView.jsx
+  // Phase 7.1: MembersView now uses context — removed appData/currentUser props
   if (view === "members") {
-    return (<MembersView appData={appData} currentUser={currentUser}
+    return (<MembersView
       onSelectMember={(id) => { setSelectedMemberId(id); setView("memberDetail"); }}
       onAddMember={onAddMember} onBack={() => setView("hub")} />);
   }
@@ -749,10 +756,10 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   // PERSONAL MEMBER PAGE
   // ════════════════════════════════════════════════════════════════
-  // MEMBER DETAIL — extracted to MemberDetailView.jsx
+  // Phase 7.1: MemberDetailView now uses context — removed appData/setAppData/currentUser props
   if (view === "memberDetail" && selectedMember) {
-    return (<MemberDetailView appData={appData} setAppData={setAppData}
-      selectedMember={selectedMember} currentUser={currentUser} showToast={showToast}
+    return (<MemberDetailView
+      selectedMember={selectedMember} showToast={showToast}
       onBack={() => { setView("members"); setSelectedTaskIds([]); }}
       selectedTaskIds={selectedTaskIds} setSelectedTaskIds={setSelectedTaskIds}
       completionDialogTasks={completionDialogTasks} setCompletionDialogTasks={setCompletionDialogTasks}
@@ -762,10 +769,9 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   // TASKS VIEW
   // ════════════════════════════════════════════════════════════════
-  // TASKS — extracted to TasksView.jsx
+  // Phase 7.1: TasksView now uses context — removed appData/setAppData/currentUser props
   if (view === "tasks") {
-    return (<TasksView appData={appData} setAppData={setAppData} currentUser={currentUser}
-      showToast={showToast} onBack={() => setView("hub")} onCreateTask={onCreateTask}
+    return (<TasksView showToast={showToast} onBack={() => setView("hub")} onCreateTask={onCreateTask}
       selectedTaskIds={selectedTaskIds} setSelectedTaskIds={setSelectedTaskIds}
       completionDialogTasks={completionDialogTasks} setCompletionDialogTasks={setCompletionDialogTasks}
       handleBulkComplete={handleBulkComplete} taskRowProps={taskRowProps} selectionBarProps={selectionBarProps} />);
@@ -774,9 +780,9 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   // REMINDERS VIEW
   // ════════════════════════════════════════════════════════════════
-  // REMINDERS — extracted to RemindersView.jsx
+  // Phase 7.1: RemindersView now uses context — removed appData prop
   if (view === "reminders") {
-    return (<RemindersView appData={appData} onBack={() => setView("hub")}
+    return (<RemindersView onBack={() => setView("hub")}
       onCreateReminder={onCreateReminder} onDeleteTask={handleDeleteTask}
       taskRowProps={taskRowProps} />);
   }
@@ -784,18 +790,19 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   // CALENDAR VIEW
   // ════════════════════════════════════════════════════════════════
+  // Phase 7.1: CalendarView now uses context — removed appData prop
   if (view === "calendar") {
     return (
       <>
       <PageShell narrow topNav>
         <Header title="Calendar" onBack={() => setView("hub")} />
-        <CalendarView appData={appData} onRequestComplete={(tasks) => setCompletionDialogTasks(tasks)} />
+        <CalendarView onRequestComplete={(tasks) => setCompletionDialogTasks(tasks)} />
       </PageShell>
       {completionDialogTasks && (
         <TaskCompletionDialog
           tasks={completionDialogTasks}
           users={appData.users}
-          currentUserId={appData.currentUserId}
+          currentUserId={currentUserId}
           onConfirm={handleBulkComplete}
           onCancel={() => { setCompletionDialogTasks(null); }}
         />
@@ -807,9 +814,9 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   // RECOGNITION VIEW
   // ════════════════════════════════════════════════════════════════
-  // RECOGNITION VIEW — extracted to RecognitionView.jsx
+  // Phase 7.1: RecognitionView now uses context — removed appData/setAppData/currentUser props
   if (view === "recognition" || view === "sendRecognition") {
-    return (<RecognitionView appData={appData} setAppData={setAppData} currentUser={currentUser}
+    return (<RecognitionView
       showToast={showToast} sendNotification={sendNotification} onBack={() => setView("hub")} />);
   }
 
@@ -821,18 +828,18 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
 // ════════════════════════════════════════════════════════════════
   // SETTINGS VIEW
   // ════════════════════════════════════════════════════════════════
-  // SETTINGS VIEW — extracted to SettingsView.jsx
+  // Phase 7.1: SettingsView now uses context — removed appData/setAppData/currentUser props
   if (view === "settings") {
-    return (<SettingsView appData={appData} setAppData={setAppData} currentUser={currentUser}
+    return (<SettingsView
       showToast={showToast} onBack={() => setView("hub")} />);
   }
 
   // ════════════════════════════════════════════════════════════════
   // NOTIFICATIONS VIEW
   // ════════════════════════════════════════════════════════════════
-  // NOTIFICATIONS — extracted to NotificationsView.jsx
+  // Phase 7.1: NotificationsView now uses context — removed appData/setAppData/currentUser props
   if (view === "notifications") {
-    return (<NotificationsView appData={appData} setAppData={setAppData} currentUser={currentUser}
+    return (<NotificationsView
       showToast={showToast} sendNotification={sendNotification}
       sendDirectNotification={sendDirectNotification} onBack={() => setView("hub")} />);
   }

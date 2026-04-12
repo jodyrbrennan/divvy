@@ -5,7 +5,13 @@ import PageShell from "../components/PageShell";
 import Card from "../components/Card";
 import Logo from "../components/Logo";
 
-export default function JoinHouseholdScreen({ onJoined, onBack, appData }) {
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
+export default function JoinHouseholdScreen({ onJoined, onBack }) {
+  // Phase 7.1: Pull data from context instead of receiving appData as a prop
+  const { appData } = useAppData();
+
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const handleJoin = () => {

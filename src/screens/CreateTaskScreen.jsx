@@ -14,7 +14,16 @@ import WizardNav from "../components/WizardNav";
 import { DayOfWeekPicker, DayOfMonthPicker } from "../components/DayPickers";
 import TaskPicker from "../components/TaskPicker";
 
-export default function CreateTaskScreen({ onComplete, onBack, users, editingTask, currentUserId, existingTasks, isReminder }) {
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
+// Phase 7.1: Removed users, currentUserId, existingTasks from props — now pulled from context
+export default function CreateTaskScreen({ onComplete, onBack, editingTask, isReminder }) {
+  // Phase 7.1: Pull data from context
+  const { appData, currentUserId } = useAppData();
+  const users = appData.users;
+  const existingTasks = appData.tasks;
+
   const isEditing = !!editingTask;
   const [mode, setMode] = useState(isEditing ? "form" : "pick");
   const [step, setStep] = useState(0);

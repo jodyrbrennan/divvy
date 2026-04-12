@@ -8,24 +8,21 @@ import Avatar from "../components/Avatar";
 import Divider from "../components/Divider";
 import Header from "../components/Header";
 
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
 /**
  * Notifications view — extracted from Dashboard.jsx (Phase 6.1).
- * Phase 6.2: setAppData uses functional updater to prevent race conditions.
- *
- * Props:
- *   appData, setAppData — app state
- *   currentUser — the logged-in user object
- *   showToast — toast notification function
- *   sendNotification — sends a user notification through the approval flow
- *   sendDirectNotification — sends a notification bypassing approval
- *   onBack — navigate back to hub
+ * Phase 7.1: Now uses useAppData() context instead of receiving appData/setAppData/currentUser as props.
  */
 export default function NotificationsView({
-  appData, setAppData, currentUser,
   showToast, sendNotification, sendDirectNotification, onBack,
 }) {
+  // Phase 7.1: Pull data from context
+  const { appData, setAppData, currentUser, currentUserId } = useAppData();
+
   const myNotifs = (appData.notifications || [])
-    .filter((n) => n.targetUserId === appData.currentUserId)
+    .filter((n) => n.targetUserId === currentUserId)
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
   // Mark a notification as actioned (using functional updater)
@@ -51,7 +48,7 @@ export default function NotificationsView({
   // Handle "Take a task back" button
   const handleTakeTaskBack = (n, actionTargetId, completedByUser) => {
     const theirTasks = appData.tasks.filter((t) =>
-      isTaskDueToday(t) && t.assignedTo?.includes(actionTargetId) && !t.assignedTo?.includes(appData.currentUserId)
+      isTaskDueToday(t) && t.assignedTo?.includes(actionTargetId) && !t.assignedTo?.includes(currentUserId)
     );
     if (theirTasks.length === 0) {
       showToast(`${completedByUser?.name || "They"} ha${completedByUser ? "s" : "ve"} no tasks you can take right now`);
@@ -117,7 +114,7 @@ export default function NotificationsView({
                 <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
               </svg>
             );
-            const isCompletedForMe = n.type === "completion" && n.completedBy && n.completedBy !== appData.currentUserId && !n.actioned;
+            const isCompletedForMe = n.type === "completion" && n.completedBy && n.completedBy !== currentUserId && !n.actioned;
             const actionTargetId = n.completedBy || n.fromUserId;
             return (
               <div key={n.id}>

@@ -10,14 +10,19 @@ import HoldOption from "../components/HoldOption";
 import { StarIcon } from "../components/Icons";
 import Header from "../components/Header";
 
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
 /**
  * Recognition view — feed + send flow, extracted from Dashboard.jsx (Phase 6.1).
- * Phase 6.2: setAppData uses functional updater to prevent race conditions.
+ * Phase 7.1: Now uses useAppData() context instead of receiving appData/setAppData/currentUser as props.
  */
 export default function RecognitionView({
-  appData, setAppData, currentUser,
   showToast, sendNotification, onBack,
 }) {
+  // Phase 7.1: Pull data from context
+  const { appData, setAppData, currentUser, currentUserId } = useAppData();
+
   const [subView, setSubView] = useState("feed"); // "feed" or "send"
   const [recoStep, setRecoStep] = useState(0);
   const [recoTarget, setRecoTarget] = useState(null);
@@ -35,7 +40,7 @@ export default function RecognitionView({
     if (!recoTarget || !recoMessage.trim()) return;
     const pointsVal = Math.max(0, parseInt(recoPoints) || 0);
     const recognition = {
-      id: uid(), fromUserId: appData.currentUserId, toUserId: recoTarget,
+      id: uid(), fromUserId: currentUserId, toUserId: recoTarget,
       message: recoMessage.trim(), pointsAwarded: pointsVal,
       timestamp: new Date().toISOString(),
     };
@@ -56,7 +61,7 @@ export default function RecognitionView({
 
   // ── SEND RECOGNITION FLOW ──
   if (subView === "send") {
-    const otherUsers = appData.users.filter((u) => u.id !== appData.currentUserId);
+    const otherUsers = appData.users.filter((u) => u.id !== currentUserId);
     const targetUser = appData.users.find((u) => u.id === recoTarget);
 
     return (

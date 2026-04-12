@@ -8,17 +8,17 @@ import Divider from "../components/Divider";
 import Header from "../components/Header";
 import TaskRow from "../components/TaskRow";
 
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
 /**
  * RemindersView — shows today's reminders and a full list of all reminders.
- *
- * Props:
- *   appData              – global data
- *   onBack               – callback to navigate back to hub
- *   onCreateReminder     – callback to launch the reminder-creation wizard
- *   onDeleteTask         – callback(taskId) to delete a reminder
- *   taskRowProps          – spread-props for <TaskRow>
+ * Phase 7.1: Now uses useAppData() context instead of receiving appData as a prop.
  */
-export default function RemindersView({ appData, onBack, onCreateReminder, onDeleteTask, taskRowProps }) {
+export default function RemindersView({ onBack, onCreateReminder, onDeleteTask, taskRowProps }) {
+  // Phase 7.1: Pull data from context
+  const { appData } = useAppData();
+
   const dueReminders = appData.tasks.filter((t) => t.isReminder && isTaskDueToday(t));
   const completedReminders = appData.tasks.filter(
     (t) => t.isReminder && !isTaskDueToday(t) && t.lastCompleted && new Date(t.lastCompleted).toDateString() === new Date().toDateString()

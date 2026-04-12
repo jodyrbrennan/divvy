@@ -7,7 +7,17 @@ import Card from "../components/Card";
 import { getUserName } from "../utils/userHelpers";
 import { CheckCircleIcon } from "../components/Icons";
 
-export default function CalendarView({ appData, onRequestComplete }) {
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
+/**
+ * CalendarView — monthly calendar with task indicators.
+ * Phase 7.1: Now uses useAppData() context instead of receiving appData as a prop.
+ */
+export default function CalendarView({ onRequestComplete }) {
+  // Phase 7.1: Pull data from context
+  const { appData } = useAppData();
+
   const now = new Date();
   const [viewMonth, setViewMonth] = useState(now.getMonth());
   const [viewYear, setViewYear] = useState(now.getFullYear());

@@ -13,6 +13,7 @@ import Divider from "../components/Divider";
 import TaskRow from "../components/TaskRow";
 import SelectionBar from "../components/SelectionBar";
 import TaskCompletionDialog from "../components/TaskCompletionDialog";
+import { useAppData } from "../contexts/AppDataContext";
 
 const TAG_SUGGESTIONS = {
   parent: ["Dad", "Mom", "Papa", "Mama", "Pop", "Mother", "Father"],
@@ -46,11 +47,12 @@ const TAG_SUGGESTIONS = {
  *   selectionBarProps         – spread-props for <SelectionBar>
  */
 export default function MemberDetailView({
-  appData, setAppData, selectedMember, currentUser, showToast, onBack,
+  selectedMember, showToast, onBack,
   selectedTaskIds, setSelectedTaskIds,
   completionDialogTasks, setCompletionDialogTasks, handleBulkComplete,
   taskRowProps, selectionBarProps,
 }) {
+  const { appData, setAppData, currentUser, currentUserId } = useAppData();
   // ── Member-detail-only state ──
   const [showReports, setShowReports] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);

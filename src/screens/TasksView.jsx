@@ -12,19 +12,25 @@ import TaskRow from "../components/TaskRow";
 import SelectionBar from "../components/SelectionBar";
 import TaskCompletionDialog from "../components/TaskCompletionDialog";
 
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
 /**
  * TasksView — shows today's due tasks with selection, completion,
  * and an unscheduled-task logging form.
  *
- * Phase 6.2: setAppData uses functional updater to prevent race conditions.
+ * Phase 7.1: Now uses useAppData() context instead of receiving appData/setAppData/currentUser as props.
  */
 export default function TasksView({
-  appData, setAppData, currentUser, showToast,
+  showToast,
   onBack, onCreateTask,
   selectedTaskIds, setSelectedTaskIds,
   completionDialogTasks, setCompletionDialogTasks, handleBulkComplete,
   taskRowProps, selectionBarProps,
 }) {
+  // Phase 7.1: Pull data from context
+  const { appData, setAppData, currentUser, currentUserId } = useAppData();
+
   // ── Local state for the "Log unscheduled task" form ──
   const [showUnscheduledForm, setShowUnscheduledForm] = useState(false);
   const [unschedName, setUnschedName] = useState("");
@@ -42,12 +48,12 @@ export default function TasksView({
       schedule: "none", scheduleConfig: { frequency: "none" },
       taskType: "unscheduled", tempConfig: null,
       dueConfig: { type: "none" },
-      assignedTo: [appData.currentUserId], assignMode: "me",
+      assignedTo: [currentUserId], assignMode: "me",
       rotation: null, points: pointsVal,
       status: "completed", lastCompleted: now,
-      createdAt: now, createdBy: appData.currentUserId,
+      createdAt: now, createdBy: currentUserId,
     };
-    const completion = { id: uid(), taskId, userId: appData.currentUserId, timestamp: now, pointsEarned: pointsVal };
+    const completion = { id: uid(), taskId, userId: currentUserId, timestamp: now, pointsEarned: pointsVal };
     const completerName = currentUser?.name || "Someone";
 
     setAppData(prev => {
@@ -129,7 +135,7 @@ export default function TasksView({
       <TaskCompletionDialog
         tasks={completionDialogTasks}
         users={appData.users}
-        currentUserId={appData.currentUserId}
+        currentUserId={currentUserId}
         onConfirm={handleBulkComplete}
         onCancel={() => { setCompletionDialogTasks(null); }}
       />

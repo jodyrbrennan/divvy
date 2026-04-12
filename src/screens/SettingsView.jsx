@@ -9,11 +9,17 @@ import Card from "../components/Card";
 import Avatar from "../components/Avatar";
 import Header from "../components/Header";
 
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
 /**
  * Settings view — extracted from Dashboard.jsx (Phase 6.1).
- * Phase 6.2: All setAppData calls now use functional updater pattern.
+ * Phase 7.1: Now uses useAppData() context instead of receiving appData/setAppData/currentUser as props.
  */
-export default function SettingsView({ appData, setAppData, currentUser, showToast, onBack }) {
+export default function SettingsView({ showToast, onBack }) {
+  // Phase 7.1: Pull data from context
+  const { appData, setAppData, currentUser } = useAppData();
+
   const [editingName, setEditingName] = useState(false);
   const [tempName, setTempName] = useState("");
   const [confirmSignOut, setConfirmSignOut] = useState(false);
@@ -49,7 +55,6 @@ export default function SettingsView({ appData, setAppData, currentUser, showToa
     showToast(`Time zone set to ${tz}`);
   };
 
-  // Already uses functional updater — no change needed
   const handleUpdateCommPref = (key, value) => {
     setAppData((prev) => {
       const newData = {

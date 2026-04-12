@@ -7,10 +7,17 @@ import Avatar from "../components/Avatar";
 import Divider from "../components/Divider";
 import Header from "../components/Header";
 
+// Phase 7.1: Use context instead of props for app data
+import { useAppData } from "../contexts/AppDataContext";
+
 /**
  * Members list view — extracted from Dashboard.jsx.
+ * Phase 7.1: Now uses useAppData() context instead of receiving appData/currentUser as props.
  */
-export default function MembersView({ appData, currentUser, onSelectMember, onAddMember, onBack }) {
+export default function MembersView({ onSelectMember, onAddMember, onBack }) {
+  // Phase 7.1: Pull data from context
+  const { appData, currentUser, currentUserId } = useAppData();
+
   const activeMembers = appData.users.filter((u) => u.status !== "pending");
   const pendingMembers = appData.users.filter((u) => u.status === "pending");
 
@@ -35,7 +42,7 @@ export default function MembersView({ appData, currentUser, onSelectMember, onAd
                   {u.pointBalance > 0 ? ` · ${u.pointBalance} pts` : ""}
                 </p>
               </div>
-              {u.id === appData.currentUserId && (
+              {u.id === currentUserId && (
                 <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: C.navy, background: C.ice, padding: "4px 10px", borderRadius: 50 }}>You</span>
               )}
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.steel} strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
