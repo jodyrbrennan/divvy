@@ -46,6 +46,7 @@ export default function Dashboard({ onAddMember, onCreateTask, onCreateReminder,
   const { appData, setAppData, currentUser, currentUserId } = useAppData();
 
   const [view, setView] = useState("hub");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
   const [completionDialogTasks, setCompletionDialogTasks] = useState(null);
 
@@ -577,6 +578,7 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // SIDEBAR + CONTENT LAYOUT
   // ════════════════════════════════════════════════════════════════
   const SIDEBAR_W = 200;
+  const SIDEBAR_COLLAPSED = 56;
   const NAV_ITEMS = [
     { key: "hub", label: "Home", icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -804,63 +806,93 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
     }
   };
 
+  const currentSidebarW = sidebarOpen ? SIDEBAR_W : SIDEBAR_COLLAPSED;
+
   return (
     <>
       {/* ── Fixed Sidebar ── */}
       <nav style={{
         position: "fixed", left: 0, top: 0, bottom: 0,
-        width: SIDEBAR_W, zIndex: 90,
+        width: currentSidebarW, zIndex: 90,
         background: "rgba(255,255,255,0.85)", backdropFilter: "blur(20px)",
         borderRight: `1px solid ${C.border}`,
         display: "flex", flexDirection: "column",
         padding: "72px 0 16px",
-        overflowY: "auto",
+        overflowY: "auto", overflowX: "hidden",
+        transition: "width 0.25s cubic-bezier(.4,0,.2,1)",
       }}>
+        {/* Toggle button */}
+        <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{
+          all: "unset", cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: sidebarOpen ? "flex-end" : "center",
+          padding: sidebarOpen ? "6px 14px" : "6px 0",
+          marginBottom: 4, width: "100%", boxSizing: "border-box",
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.steel} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ transition: "transform 0.25s", transform: sidebarOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
+            <path d="M9 18l6-6-6-6"/>
+          </svg>
+        </button>
+
         {/* Nav Items */}
-        <div style={{ flex: 1, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ flex: 1, padding: sidebarOpen ? "4px 10px" : "4px 6px", display: "flex", flexDirection: "column", gap: 2 }}>
           {NAV_ITEMS.map((item) => {
-            const isActive = view === item.key || (item.key === "hub" && view === "hub");
+            const isActive = view === item.key;
             return (
-              <button key={item.key} onClick={() => setView(item.key)} style={{
+              <button key={item.key} onClick={() => setView(item.key)} title={!sidebarOpen ? item.label : undefined} style={{
                 all: "unset", cursor: "pointer",
                 display: "flex", alignItems: "center", gap: 12,
-                padding: "10px 14px", borderRadius: 12,
+                padding: sidebarOpen ? "10px 14px" : "10px 0",
+                justifyContent: sidebarOpen ? "flex-start" : "center",
+                borderRadius: 12,
                 background: isActive ? C.ice : "transparent",
                 color: isActive ? C.navy : C.steel,
                 fontFamily: font, fontSize: 13, fontWeight: isActive ? 700 : 500,
                 transition: "all 0.15s",
+                whiteSpace: "nowrap", overflow: "hidden",
               }}>
                 <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20 }}>
                   {item.icon}
                 </div>
-                <span>{item.label}</span>
+                {sidebarOpen && <span style={{ opacity: 1, transition: "opacity 0.2s" }}>{item.label}</span>}
               </button>
             );
           })}
         </div>
 
-        {/* Bottom section: Settings + Notifications */}
-        <div style={{ padding: "8px 10px", borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 2 }}>
-          <button onClick={() => setView("notifications")} style={{
+        {/* Bottom section */}
+        <div style={{ padding: sidebarOpen ? "8px 10px" : "8px 6px", borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 2 }}>
+          <button onClick={() => setView("notifications")} title={!sidebarOpen ? "Notifications" : undefined} style={{
             all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
-            padding: "10px 14px", borderRadius: 12,
+            padding: sidebarOpen ? "10px 14px" : "10px 0",
+            justifyContent: sidebarOpen ? "flex-start" : "center",
+            borderRadius: 12, position: "relative",
             background: view === "notifications" ? C.ice : "transparent",
             color: view === "notifications" ? C.navy : C.steel,
             fontFamily: font, fontSize: 13, fontWeight: view === "notifications" ? 700 : 500,
           }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
-            </svg>
-            <span>Notifications</span>
-            {myUnreadCount > 0 && (
+            <div style={{ position: "relative", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
+              </svg>
+              {!sidebarOpen && myUnreadCount > 0 && (
+                <span style={{ position: "absolute", top: -4, right: -6, fontSize: 8, fontWeight: 700, color: C.white,
+                  background: C.danger, borderRadius: 50, padding: "1px 4px", minWidth: 12, textAlign: "center", lineHeight: "12px",
+                }}>{myUnreadCount}</span>
+              )}
+            </div>
+            {sidebarOpen && <span>Notifications</span>}
+            {sidebarOpen && myUnreadCount > 0 && (
               <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: C.white,
                 background: C.danger, borderRadius: 50, padding: "2px 7px", minWidth: 16, textAlign: "center",
               }}>{myUnreadCount}</span>
             )}
           </button>
-          <button onClick={() => setView("settings")} style={{
+          <button onClick={() => setView("settings")} title={!sidebarOpen ? "Settings" : undefined} style={{
             all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
-            padding: "10px 14px", borderRadius: 12,
+            padding: sidebarOpen ? "10px 14px" : "10px 0",
+            justifyContent: sidebarOpen ? "flex-start" : "center",
+            borderRadius: 12,
             background: view === "settings" ? C.ice : "transparent",
             color: view === "settings" ? C.navy : C.steel,
             fontFamily: font, fontSize: 13, fontWeight: view === "settings" ? 700 : 500,
@@ -868,17 +900,17 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
             </svg>
-            <span>Settings</span>
+            {sidebarOpen && <span>Settings</span>}
           </button>
         </div>
       </nav>
 
       {/* ── Main Content (offset by sidebar width) ── */}
-      <div style={{ marginLeft: SIDEBAR_W }}>
+      <div style={{ marginLeft: currentSidebarW, transition: "margin-left 0.25s cubic-bezier(.4,0,.2,1)" }}>
         {renderContent()}
       </div>
 
-      {/* ── Task Completion Dialog (overlay, shown for non-calendar views) ── */}
+      {/* ── Task Completion Dialog ── */}
       {completionDialogTasks && view !== "calendar" && (
         <TaskCompletionDialog tasks={completionDialogTasks} users={appData.users}
           currentUserId={currentUserId} onConfirm={handleBulkComplete}
