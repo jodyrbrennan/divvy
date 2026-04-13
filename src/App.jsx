@@ -38,6 +38,7 @@ import InviteCodeScreen from "./screens/InviteCodeScreen";
 import ProfileSetupScreen from "./screens/ProfileSetupScreen";
 import Dashboard from "./screens/Dashboard";
 import CreateTaskScreen from "./screens/CreateTaskScreen";
+import CreateEventScreen from "./screens/CreateEventScreen";
 import AddMemberScreen from "./screens/AddMemberScreen";
 
 export default function App() {
@@ -45,6 +46,7 @@ export default function App() {
   const [screen, setScreen] = useState("loading");
   const [pendingHousehold, setPendingHousehold] = useState(null);
   const [editingTask, setEditingTask] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);
   const [requestedView, setRequestedView] = useState(null);
   const [pendingPreview, setPendingPreview] = useState(null);
   const [pendingUserId, setPendingUserId] = useState(null);
@@ -201,7 +203,12 @@ export default function App() {
           relationships: {}, relationshipTags: {},
           communicationProfile: { tone: profile.tone, sensitivity: profile.sensitivity, forgetfulness: profile.forgetfulness,
             undoneFeelings: profile.undoneFeelings, askStyle: profile.askStyle, notifFrequency: profile.notifFrequency, recognitionPref: profile.recognitionPref } };
-        newData = { ...prev, household: pendingHousehold || prev.household, users: [...(prev?.users || []), user], currentUserId: user.id };
+        // If this is a brand new household (not joining), mark this user as the head of household
+        const household = pendingHousehold || prev.household;
+        if (pendingHousehold && !prev.household) {
+          household.createdBy = newUserId;
+        }
+        newData = { ...prev, household, users: [...(prev?.users || []), user], currentUserId: user.id };
       }
       saveData(newData);
       return newData;
@@ -270,6 +277,24 @@ export default function App() {
     setEditingTask(null); setScreen("dashboard");
   };
 
+  const handleEventCreated = (event) => {
+    setAppData((prev) => {
+      const newData = { ...prev, events: [...(prev.events || []), event] };
+      saveData(newData);
+      return newData;
+    });
+    setScreen("dashboard"); setRequestedView("calendar");
+  };
+
+  const handleEventEdited = (updatedEvent) => {
+    setAppData((prev) => {
+      const newData = { ...prev, events: (prev.events || []).map((e) => e.id === updatedEvent.id ? updatedEvent : e) };
+      saveData(newData);
+      return newData;
+    });
+    setEditingEvent(null); setScreen("dashboard"); setRequestedView("calendar");
+  };
+
   const handlePasswordResetComplete = () => {
     if (!appData || !authSession?.user?.email) { setScreen("signIn"); return; }
     const email = authSession.user.email.toLowerCase().trim();
@@ -296,7 +321,7 @@ export default function App() {
     </div></PageShell>);
   }
 
-  const loggedIn = appData?.currentUserId && ["dashboard", "createTask", "editTask", "createReminder", "addMember"].includes(screen);
+  const loggedIn = appData?.currentUserId && ["dashboard", "createTask", "editTask", "createReminder", "addMember", "createEvent", "editEvent"].includes(screen);
   const currentUserName = appData?.users?.find((u) => u.id === appData?.currentUserId)?.name || "";
   const myUnreadCount = (appData?.notifications || []).filter((n) => n.targetUserId === appData?.currentUserId && !n.read).length;
 
@@ -311,7 +336,13 @@ export default function App() {
           onSignOut={handleSignOut}
         />}
 
-        {screen === "welcome" && <WelcomeScreen onSignUp={() => setScreen("signUp")} onSignIn={() => setScreen("signIn")} />}
+        {screen === "welcome" && <WelcomeScreen onSignUp={() => setScreen("signUp")} onSignIn={() => setScreen("signIn")} onDevBypass={() => {
+          if (!appData?.users?.length) { alert("No household data found. Create an account first."); return; }
+          const firstUser = appData.users.find((u) => u.status === "active") || appData.users[0];
+          localStorage.setItem("divvy-current-user", firstUser.id);
+          setAppData((prev) => { const newData = { ...prev, currentUserId: firstUser.id }; saveData(newData); return newData; });
+          setScreen("dashboard");
+        }} />}
         {screen === "signUp" && <SignUpScreen onSignUpSuccess={(email) => { setVerifyEmail(email); setScreen("verifyEmail"); }} onDevBypass={handleDevBypass} onBack={() => setScreen("welcome")} />}
         {screen === "signIn" && <SignInScreen onBack={() => setScreen("welcome")} onForgotPassword={() => setScreen("forgotPassword")} onDirectSignIn={handleDirectSignIn} />}
         {screen === "verifyEmail" && <VerifyEmailScreen email={verifyEmail} onBackToSignIn={() => setScreen("signIn")} />}
@@ -325,11 +356,14 @@ export default function App() {
 
         {screen === "dashboard" && <Dashboard onAddMember={() => setScreen("addMember")} onCreateTask={() => setScreen("createTask")}
           onCreateReminder={() => setScreen("createReminder")} onEditTask={(task) => { setEditingTask(task); setScreen("editTask"); }}
+          onCreateEvent={() => setScreen("createEvent")} onEditEvent={(event) => { setEditingEvent(event); setScreen("editEvent"); }}
           requestedView={requestedView} clearRequestedView={() => setRequestedView(null)}
           pendingPreview={pendingPreview} clearPendingPreview={() => setPendingPreview(null)} />}
         {screen === "createTask" && <CreateTaskScreen onComplete={handleTaskCreated} onBack={() => setScreen("dashboard")} />}
         {screen === "editTask" && <CreateTaskScreen editingTask={editingTask} onComplete={handleTaskEdited} onBack={() => { setEditingTask(null); setScreen("dashboard"); }} />}
         {screen === "createReminder" && <CreateTaskScreen isReminder onComplete={handleTaskCreated} onBack={() => setScreen("dashboard")} />}
+        {screen === "createEvent" && <CreateEventScreen onComplete={handleEventCreated} onBack={() => setScreen("dashboard")} />}
+        {screen === "editEvent" && <CreateEventScreen editingEvent={editingEvent} onComplete={handleEventEdited} onBack={() => { setEditingEvent(null); setScreen("dashboard"); }} />}
         {screen === "addMember" && <AddMemberScreen onComplete={handleAddMember} onBack={() => setScreen("dashboard")} />}
       </AppDataProvider>
     </ToastProvider>

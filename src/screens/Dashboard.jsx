@@ -4,6 +4,7 @@ import { btnBase, btnGhost } from "../constants/styles";
 import { uid, saveData, defaultData } from "../utils/storage";
 import { createNotification } from "../utils/notificationHelpers";
 import { rewriteForUser } from "../utils/communication";
+import { askOllama } from "../utils/aiConfig";
 import { isTaskDueToday } from "../utils/taskHelpers";
 
 // Phase 7.1: Import the context hook instead of receiving props
@@ -25,6 +26,8 @@ import RecognitionView from "./RecognitionView";
 import SettingsView from "./SettingsView";
 import TasksView from "./TasksView";
 import RemindersView from "./RemindersView";
+import BalanceReportView from "./BalanceReportView";
+import HouseholdFeed from "./HouseholdFeed";
 import MemberDetailView from "./MemberDetailView";
 import Header from "../components/Header";
 import VoiceCommandOverlay from "../components/VoiceCommandOverlay";
@@ -38,7 +41,7 @@ import SelectionBar from "../components/SelectionBar";
 // ─── Dashboard ─────────────────────────────────────────────────
 // Phase 7.1: Removed appData and setAppData from props — now pulled from context.
 // Only navigation callbacks and App-owned UI state remain as props.
-export default function Dashboard({ onAddMember, onCreateTask, onCreateReminder, onEditTask, requestedView, clearRequestedView, pendingPreview, clearPendingPreview }) {
+export default function Dashboard({ onAddMember, onCreateTask, onCreateReminder, onEditTask, onCreateEvent, onEditEvent, requestedView, clearRequestedView, pendingPreview, clearPendingPreview }) {
   // Phase 7.1: Pull data from context instead of props
   const { appData, setAppData, currentUser, currentUserId } = useAppData();
 
@@ -253,13 +256,7 @@ export default function Dashboard({ onAddMember, onCreateTask, onCreateReminder,
     const memberList = appData.users.map((u) => `${u.name} (id: ${u.id}, type: ${u.type})`).join(", ");
     const parse = async () => {
       try {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            system: `You are a voice command parser for a household task app called Divvy. Parse the user's voice command and return ONLY valid JSON with no markdown or backticks.
+        const systemPrompt = `You are a voice command parser for a household task app called Divvy. Parse the user's voice command and return ONLY valid JSON with no markdown or backticks.
 
 Current user: ${currentUser?.name} (id: ${currentUserId})
 Household members: ${memberList}
@@ -281,12 +278,10 @@ Return this JSON format:
   "confidence": "high" | "medium" | "low"
 }
 
-Interpret relative dates like "next Saturday" into actual dates. If the command mentions telling someone or asking someone to do something, it's a task assigned to that person. If it's about thanking or appreciating someone, it's a recognition. If it's a reminder for the user themselves, it's a reminder.`,
-            messages: [{ role: "user", content: voiceTranscript }],
-          }),
-        });
-        const data = await response.json();
-        const text = data.content?.map((c) => c.text || "").join("") || "";
+Interpret relative dates like "next Saturday" into actual dates. If the command mentions telling someone or asking someone to do something, it's a task assigned to that person. If it's about thanking or appreciating someone, it's a recognition. If it's a reminder for the user themselves, it's a reminder.`;
+
+        const text = await askOllama(systemPrompt, voiceTranscript);
+        if (!text) throw new Error("No response from Ollama");
         const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
         setVoiceParsed(parsed);
         setVoiceMode("result");
@@ -555,7 +550,6 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   // VOICE COMMAND OVERLAY (renders over any view)
   // ════════════════════════════════════════════════════════════════
-  // VOICE — extracted to VoiceCommandOverlay.jsx
   if (voiceMode !== "idle") {
     return (<VoiceCommandOverlay voiceMode={voiceMode} voiceTranscript={voiceTranscript}
       voiceParsed={voiceParsed} voiceError={voiceError} startVoice={startVoice} stopVoice={stopVoice}
@@ -563,9 +557,8 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   }
 
   // ════════════════════════════════════════════════════════════════
-  // MESSAGE APPROVAL OVERLAY (sender reviews before delivering)
+  // MESSAGE APPROVAL OVERLAY
   // ════════════════════════════════════════════════════════════════
-  // APPROVAL — extracted to MessageApprovalOverlay.jsx
   if (pendingApproval) {
     return (<MessageApprovalOverlay pendingApproval={pendingApproval} setPendingApproval={setPendingApproval}
       commitNotification={commitNotification} reRewriteForApproval={reRewriteForApproval} />);
@@ -574,7 +567,6 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   // ════════════════════════════════════════════════════════════════
   // TEXT COMMAND OVERLAY
   // ════════════════════════════════════════════════════════════════
-  // TEXT COMMAND — extracted to TextCommandOverlay.jsx
   if (textCommandOpen) {
     return (<TextCommandOverlay textCommandInput={textCommandInput} setTextCommandInput={setTextCommandInput}
       textShift={textShift} setTextShift={setTextShift} textInputRef={textInputRef}
@@ -582,267 +574,316 @@ Interpret relative dates like "next Saturday" into actual dates. If the command 
   }
 
   // ════════════════════════════════════════════════════════════════
-  // HUB VIEW
+  // SIDEBAR + CONTENT LAYOUT
   // ════════════════════════════════════════════════════════════════
-  if (view === "hub") {
-    const todayTasks = appData.tasks.filter((t) => !t.isReminder && isTaskDueToday(t));
-    const todayReminders = appData.tasks.filter((t) => t.isReminder && isTaskDueToday(t));
-    return (
-      <PageShell narrow topNav>
-        <div style={{ textAlign: "center", marginTop: 16, marginBottom: 32, animation: "fadeUp 0.4s ease both" }}>
-          <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 32, fontWeight: 700, color: C.dark, letterSpacing: "-0.01em" }}>
-            {appData.household?.name}
-          </h1>
-        </div>
+  const SIDEBAR_W = 200;
+  const NAV_ITEMS = [
+    { key: "hub", label: "Home", icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/>
+      </svg>
+    ) },
+    { key: "calendar", label: "Calendar", icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/>
+      </svg>
+    ) },
+    { key: "events", label: "Events", icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+      </svg>
+    ) },
+    { key: "tasks", label: "Tasks", icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4"/>
+      </svg>
+    ) },
+    { key: "reminders", label: "Reminders", icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
+      </svg>
+    ) },
+    { key: "recognition", label: "Recognition", icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+      </svg>
+    ) },
+    { key: "balance", label: "Balance", icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 20V10M12 20V4M6 20v-6"/>
+      </svg>
+    ) },
+    { key: "members", label: "Members", icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/>
+      </svg>
+    ) },
+  ];
 
-        {/* Missing relationships warning */}
-        {missingRelationships.length > 0 && (
-          <button onClick={() => { setSelectedMemberId(currentUserId); setView("memberDetail"); }} style={{
-            all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
-            width: "100%", padding: "14px 18px", marginBottom: 16,
-            borderRadius: 14, background: "rgba(170,199,216,0.15)",
-            border: `1.5px solid ${C.sky}`,
-            animation: "fadeUp 0.3s ease both",
-            boxSizing: "border-box",
-          }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
-            </svg>
-            <div style={{ flex: 1 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: C.dark }}>
-                {missingRelationships.length} relationship{missingRelationships.length !== 1 ? "s" : ""} to set up
-              </p>
-              <p style={{ fontSize: 12, color: C.steel, marginTop: 1 }}>
-                Tap to update how you're related to {missingRelationships.map((u) => u.name).join(", ")}
-              </p>
-            </div>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.steel} strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
-          </button>
-        )}
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {[
-            { key: "calendar", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/>
-              </svg>
-            ), label: "Calendar", sub: new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) },
-            { key: "tasks", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12l2 2 4-4"/>
-              </svg>
-            ), label: "Tasks", sub: `${todayTasks.length} due today` },
-            { key: "reminders", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
-              </svg>
-            ), label: "Reminders", sub: `${todayReminders.length} today` },
-            { key: "recognition", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
-              </svg>
-            ), label: "Recognition", sub: `${(appData.recognitions || []).length} shout-out${(appData.recognitions || []).length !== 1 ? "s" : ""}` },
-            { key: "members", icon: (
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 014-4h4a4 4 0 014 4v2"/><circle cx="19" cy="7" r="3"/><path d="M21 21v-2a3 3 0 00-2-2.83"/>
-              </svg>
-            ), label: "Members", sub: `${appData.users.length} member${appData.users.length !== 1 ? "s" : ""}` },
-          ].map((item) => (
-            <button key={item.key} onClick={() => setView(item.key)} style={{
-              all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 18,
-              padding: "22px 24px", borderRadius: 18,
-              background: C.cardBg, backdropFilter: "blur(24px)",
-              border: `1px solid ${C.borderLight}`,
-              boxShadow: "0 4px 24px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.6)",
-              animation: "fadeUp 0.4s ease both",
-              transition: "all 0.2s",
-            }}>
-              <div style={{
-                width: 56, height: 56, borderRadius: 16, background: C.ice,
-                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+  const renderContent = () => {
+    switch (view) {
+      case "hub":
+        return (
+          <PageShell narrow topNav>
+            {/* Missing relationships warning */}
+            {missingRelationships.length > 0 && (
+              <button onClick={() => { setSelectedMemberId(currentUserId); setView("memberDetail"); }} style={{
+                all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+                width: "100%", padding: "14px 18px", marginBottom: 16, borderRadius: 14,
+                background: "rgba(170,199,216,0.15)", border: `1.5px solid ${C.sky}`, boxSizing: "border-box",
               }}>
-                {item.icon}
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.navy} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+                </svg>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: C.dark }}>{missingRelationships.length} relationship{missingRelationships.length !== 1 ? "s" : ""} to set up</p>
+                  <p style={{ fontSize: 12, color: C.steel, marginTop: 1 }}>Tap to update how you're related to {missingRelationships.map((u) => u.name).join(", ")}</p>
+                </div>
+              </button>
+            )}
+
+            <HouseholdFeed onStartVoice={startVoice} onStartText={startTextCommand} />
+
+            {/* DEV: User Switcher */}
+            <Card style={{ marginTop: 28, padding: "14px 18px", border: "2px dashed rgba(192,57,43,0.3)", background: "rgba(192,57,43,0.03)" }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: C.danger, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Dev — Switch User</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {appData.users.map((u) => {
+                  const isActive = u.id === currentUserId;
+                  return (
+                    <button key={u.id} onClick={() => {
+                      if (isActive) return;
+                      setAppData(prev => { const newData = { ...prev, currentUserId: u.id }; saveData(newData); return newData; });
+                    }} style={{
+                      all: "unset", cursor: isActive ? "default" : "pointer",
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "8px 12px", borderRadius: 10,
+                      background: isActive ? C.ice : "transparent",
+                      border: `1.5px solid ${isActive ? C.sky : C.border}`,
+                      opacity: isActive ? 1 : 0.7,
+                    }}>
+                      <Avatar name={u.name} type={u.type} size={24} image={u.avatar} crop={u.avatarCrop} />
+                      <span style={{ fontSize: 13, fontWeight: isActive ? 700 : 500, color: isActive ? C.dark : C.steel }}>{u.name}</span>
+                      {isActive && <span style={{ fontSize: 9, fontWeight: 700, color: C.navy, background: C.sky, padding: "2px 8px", borderRadius: 50, marginLeft: "auto", textTransform: "uppercase", letterSpacing: "0.06em" }}>Active</span>}
+                    </button>
+                  );
+                })}
               </div>
-              <div>
-                <p style={{ fontWeight: 600, fontSize: 18, color: C.dark }}>{item.label}</p>
-                <p style={{ fontSize: 13, color: C.steel, marginTop: 2 }}>{item.sub}</p>
-              </div>
+            </Card>
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <button onClick={handleReset} style={{ ...btnGhost, color: C.danger, fontSize: 13 }}>Reset everything</button>
+            </div>
+          </PageShell>
+        );
+
+      case "members":
+        return (<MembersView onSelectMember={(id) => { setSelectedMemberId(id); setView("memberDetail"); }}
+          onAddMember={onAddMember} onBack={() => setView("hub")} />);
+
+      case "memberDetail":
+        return selectedMember ? (<MemberDetailView
+          selectedMember={selectedMember} showToast={showToast}
+          onBack={() => { setView("members"); setSelectedTaskIds([]); }}
+          selectedTaskIds={selectedTaskIds} setSelectedTaskIds={setSelectedTaskIds}
+          completionDialogTasks={completionDialogTasks} setCompletionDialogTasks={setCompletionDialogTasks}
+          handleBulkComplete={handleBulkComplete} taskRowProps={taskRowProps} selectionBarProps={selectionBarProps} />) : null;
+
+      case "tasks":
+        return (<TasksView showToast={showToast} onBack={() => setView("hub")} onCreateTask={onCreateTask}
+          selectedTaskIds={selectedTaskIds} setSelectedTaskIds={setSelectedTaskIds}
+          completionDialogTasks={completionDialogTasks} setCompletionDialogTasks={setCompletionDialogTasks}
+          handleBulkComplete={handleBulkComplete} taskRowProps={taskRowProps} selectionBarProps={selectionBarProps} />);
+
+      case "reminders":
+        return (<RemindersView onBack={() => setView("hub")}
+          onCreateReminder={onCreateReminder} onDeleteTask={handleDeleteTask}
+          taskRowProps={taskRowProps} />);
+
+      case "balance":
+        return (<BalanceReportView onBack={() => setView("hub")} />);
+
+      case "events": {
+        const allEvents = (appData.events || []).sort((a, b) => new Date(a.date) - new Date(b.date));
+        const EVENT_CFG = { birthday: { emoji: "🎂", color: "#E67E22" }, appointment: { emoji: "🏥", color: "#8E44AD" }, gathering: { emoji: "🎉", color: "#E74C3C" }, school: { emoji: "📚", color: "#2980B9" }, holiday: { emoji: "🌟", color: "#F1C40F" }, travel: { emoji: "✈️", color: "#1ABC9C" }, other: { emoji: "📌", color: "#7F8C8D" } };
+        const formatEvtDate = (d) => d ? new Date(d + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "";
+        return (
+          <PageShell narrow topNav>
+            <Header title="Events" onBack={() => setView("hub")} />
+            <button onClick={onCreateEvent} style={{
+              all: "unset", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              width: "100%", padding: "14px 16px", borderRadius: 14, marginBottom: 20, boxSizing: "border-box",
+              background: C.gradientPrimary, color: C.white, boxShadow: "0 4px 20px rgba(41,53,60,0.25)",
+              fontFamily: font, fontWeight: 600, fontSize: 14,
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              Add Event
             </button>
-          ))}
+            {allEvents.length === 0 ? (
+              <Card style={{ textAlign: "center", padding: "32px 20px" }}>
+                <p style={{ fontSize: 22, marginBottom: 8 }}>📅</p>
+                <p style={{ fontSize: 15, fontWeight: 600, color: C.dark, marginBottom: 4 }}>No events yet</p>
+                <p style={{ fontSize: 13, color: C.steel }}>Add birthdays, appointments, gatherings, and more.</p>
+              </Card>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {allEvents.map((evt) => {
+                  const cfg = EVENT_CFG[evt.eventType] || EVENT_CFG.other;
+                  const linkedNames = (evt.linkedMembers || []).map((id) => appData.users.find((u) => u.id === id)?.name).filter(Boolean).join(", ");
+                  return (
+                    <Card key={evt.id} style={{ padding: "14px 18px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <span style={{ fontSize: 24 }}>{cfg.emoji}</span>
+                        <div style={{ flex: 1 }}>
+                          <p style={{ fontWeight: 600, fontSize: 15, color: C.dark }}>{evt.name}</p>
+                          <div style={{ display: "flex", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 12, color: C.steel }}>{formatEvtDate(evt.date)}</span>
+                            {evt.time && <span style={{ fontSize: 12, color: C.steel }}>at {evt.time}</span>}
+                            {evt.recurrence === "yearly" && <span style={{ fontSize: 11, fontWeight: 600, color: cfg.color }}>Yearly</span>}
+                          </div>
+                          {linkedNames && <p style={{ fontSize: 12, color: C.steel, marginTop: 3 }}>{linkedNames}</p>}
+                          {evt.description && <p style={{ fontSize: 13, color: C.dark, marginTop: 6, lineHeight: 1.4 }}>{evt.description}</p>}
+                        </div>
+                        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                          <button onClick={() => onEditEvent(evt)} style={{ ...btnBase, padding: "6px 12px", fontSize: 11, borderRadius: 8, background: C.ice, color: C.navy }}>Edit</button>
+                          <button onClick={() => {
+                            if (window.confirm(`Delete "${evt.name}"?`)) {
+                              setAppData((prev) => { const newData = { ...prev, events: (prev.events || []).filter((e) => e.id !== evt.id) }; saveData(newData); return newData; });
+                            }
+                          }} style={{ ...btnBase, padding: "6px 12px", fontSize: 11, borderRadius: 8, background: "rgba(192,57,43,0.06)", color: C.danger }}>Delete</button>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </PageShell>
+        );
+      }
+
+      case "calendar":
+        return (
+          <>
+          <PageShell narrow topNav>
+            <Header title="Calendar" onBack={() => setView("hub")} />
+            <CalendarView onRequestComplete={(tasks) => setCompletionDialogTasks(tasks)} onEditEvent={onEditEvent} />
+            <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+              <button onClick={onCreateEvent} style={{
+                all: "unset", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                flex: 1, padding: "14px 16px", borderRadius: 14,
+                background: C.gradientPrimary, color: C.white,
+                boxShadow: "0 4px 20px rgba(41,53,60,0.25)",
+                fontFamily: font, fontWeight: 600, fontSize: 14,
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                Add Event
+              </button>
+            </div>
+          </PageShell>
+          {completionDialogTasks && (
+            <TaskCompletionDialog tasks={completionDialogTasks} users={appData.users}
+              currentUserId={currentUserId} onConfirm={handleBulkComplete}
+              onCancel={() => setCompletionDialogTasks(null)} />
+          )}
+          </>
+        );
+
+      case "recognition":
+      case "sendRecognition":
+        return (<RecognitionView showToast={showToast} sendNotification={sendNotification} onBack={() => setView("hub")} />);
+
+      case "settings":
+        return (<SettingsView showToast={showToast} onBack={() => setView("hub")} />);
+
+      case "notifications":
+        return (<NotificationsView showToast={showToast} sendNotification={sendNotification}
+          sendDirectNotification={sendDirectNotification} onBack={() => setView("hub")} />);
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <>
+      {/* ── Fixed Sidebar ── */}
+      <nav style={{
+        position: "fixed", left: 0, top: 0, bottom: 0,
+        width: SIDEBAR_W, zIndex: 90,
+        background: "rgba(255,255,255,0.85)", backdropFilter: "blur(20px)",
+        borderRight: `1px solid ${C.border}`,
+        display: "flex", flexDirection: "column",
+        padding: "72px 0 16px",
+        overflowY: "auto",
+      }}>
+        {/* Nav Items */}
+        <div style={{ flex: 1, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
+          {NAV_ITEMS.map((item) => {
+            const isActive = view === item.key || (item.key === "hub" && view === "hub");
+            return (
+              <button key={item.key} onClick={() => setView(item.key)} style={{
+                all: "unset", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "10px 14px", borderRadius: 12,
+                background: isActive ? C.ice : "transparent",
+                color: isActive ? C.navy : C.steel,
+                fontFamily: font, fontSize: 13, fontWeight: isActive ? 700 : 500,
+                transition: "all 0.15s",
+              }}>
+                <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20 }}>
+                  {item.icon}
+                </div>
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Command Buttons */}
-        <div style={{ display: "flex", gap: 10, marginTop: 20, animation: "fadeUp 0.4s ease both" }}>
-          <button onClick={startVoice} style={{
-            all: "unset", cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            flex: 1, padding: "16px 12px",
-            borderRadius: 16, background: C.gradientPrimary,
-            boxShadow: "0 4px 20px rgba(41,53,60,0.25)",
-            transition: "all 0.2s",
+        {/* Bottom section: Settings + Notifications */}
+        <div style={{ padding: "8px 10px", borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 2 }}>
+          <button onClick={() => setView("notifications")} style={{
+            all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 14px", borderRadius: 12,
+            background: view === "notifications" ? C.ice : "transparent",
+            color: view === "notifications" ? C.navy : C.steel,
+            fontFamily: font, fontSize: 13, fontWeight: view === "notifications" ? 700 : 500,
           }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.white} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
-              <path d="M19 10v2a7 7 0 01-14 0v-2"/>
-              <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>
             </svg>
-            <span style={{ fontFamily: font, fontWeight: 600, fontSize: 14, color: C.white }}>Voice</span>
+            <span>Notifications</span>
+            {myUnreadCount > 0 && (
+              <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: C.white,
+                background: C.danger, borderRadius: 50, padding: "2px 7px", minWidth: 16, textAlign: "center",
+              }}>{myUnreadCount}</span>
+            )}
           </button>
-          <button onClick={startTextCommand} style={{
-            all: "unset", cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            flex: 1, padding: "16px 12px",
-            borderRadius: 16,
-            background: `linear-gradient(135deg, ${C.navy} 0%, ${C.steel} 100%)`,
-            boxShadow: "0 4px 20px rgba(41,53,60,0.25)",
-            transition: "all 0.2s",
+          <button onClick={() => setView("settings")} style={{
+            all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 14px", borderRadius: 12,
+            background: view === "settings" ? C.ice : "transparent",
+            color: view === "settings" ? C.navy : C.steel,
+            fontFamily: font, fontSize: 13, fontWeight: view === "settings" ? 700 : 500,
           }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.white} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
             </svg>
-            <span style={{ fontFamily: font, fontWeight: 600, fontSize: 14, color: C.white }}>Text</span>
+            <span>Settings</span>
           </button>
         </div>
+      </nav>
 
-        {/* ── DEV ONLY: User Switcher ── */}
-        <Card style={{ marginTop: 28, padding: "14px 18px", border: "2px dashed rgba(192,57,43,0.3)", background: "rgba(192,57,43,0.03)" }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: C.danger, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Dev — Switch User</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {appData.users.map((u) => {
-              const isActive = u.id === currentUserId;
-              return (
-                <button key={u.id} onClick={() => {
-                  if (isActive) return;
-                  setAppData(prev => {
-                    const newData = { ...prev, currentUserId: u.id };
-                    saveData(newData);
-                    return newData;
-                  });
-                }} style={{
-                  all: "unset", cursor: isActive ? "default" : "pointer",
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "8px 12px", borderRadius: 10,
-                  background: isActive ? C.ice : "transparent",
-                  border: `1.5px solid ${isActive ? C.sky : C.border}`,
-                  opacity: isActive ? 1 : 0.7,
-                  transition: "all 0.15s",
-                }}>
-                  <Avatar name={u.name} type={u.type} size={24} image={u.avatar} crop={u.avatarCrop} />
-                  <span style={{ fontSize: 13, fontWeight: isActive ? 700 : 500, color: isActive ? C.dark : C.steel }}>{u.name}</span>
-                  {isActive && <span style={{ fontSize: 9, fontWeight: 700, color: C.navy, background: C.sky, padding: "2px 8px", borderRadius: 50, marginLeft: "auto", textTransform: "uppercase", letterSpacing: "0.06em" }}>Active</span>}
-                </button>
-              );
-            })}
-          </div>
-        </Card>
+      {/* ── Main Content (offset by sidebar width) ── */}
+      <div style={{ marginLeft: SIDEBAR_W }}>
+        {renderContent()}
+      </div>
 
-        <div style={{ textAlign: "center", marginTop: 12 }}>
-          <button onClick={handleReset} style={{ ...btnGhost, color: C.danger, fontSize: 13 }}>Reset everything</button>
-        </div>
-      </PageShell>
-    );
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // MEMBERS VIEW
-  // ════════════════════════════════════════════════════════════════
-  // Phase 7.1: MembersView now uses context — removed appData/currentUser props
-  if (view === "members") {
-    return (<MembersView
-      onSelectMember={(id) => { setSelectedMemberId(id); setView("memberDetail"); }}
-      onAddMember={onAddMember} onBack={() => setView("hub")} />);
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // PERSONAL MEMBER PAGE
-  // ════════════════════════════════════════════════════════════════
-  // Phase 7.1: MemberDetailView now uses context — removed appData/setAppData/currentUser props
-  if (view === "memberDetail" && selectedMember) {
-    return (<MemberDetailView
-      selectedMember={selectedMember} showToast={showToast}
-      onBack={() => { setView("members"); setSelectedTaskIds([]); }}
-      selectedTaskIds={selectedTaskIds} setSelectedTaskIds={setSelectedTaskIds}
-      completionDialogTasks={completionDialogTasks} setCompletionDialogTasks={setCompletionDialogTasks}
-      handleBulkComplete={handleBulkComplete} taskRowProps={taskRowProps} selectionBarProps={selectionBarProps} />);
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // TASKS VIEW
-  // ════════════════════════════════════════════════════════════════
-  // Phase 7.1: TasksView now uses context — removed appData/setAppData/currentUser props
-  if (view === "tasks") {
-    return (<TasksView showToast={showToast} onBack={() => setView("hub")} onCreateTask={onCreateTask}
-      selectedTaskIds={selectedTaskIds} setSelectedTaskIds={setSelectedTaskIds}
-      completionDialogTasks={completionDialogTasks} setCompletionDialogTasks={setCompletionDialogTasks}
-      handleBulkComplete={handleBulkComplete} taskRowProps={taskRowProps} selectionBarProps={selectionBarProps} />);
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // REMINDERS VIEW
-  // ════════════════════════════════════════════════════════════════
-  // Phase 7.1: RemindersView now uses context — removed appData prop
-  if (view === "reminders") {
-    return (<RemindersView onBack={() => setView("hub")}
-      onCreateReminder={onCreateReminder} onDeleteTask={handleDeleteTask}
-      taskRowProps={taskRowProps} />);
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // CALENDAR VIEW
-  // ════════════════════════════════════════════════════════════════
-  // Phase 7.1: CalendarView now uses context — removed appData prop
-  if (view === "calendar") {
-    return (
-      <>
-      <PageShell narrow topNav>
-        <Header title="Calendar" onBack={() => setView("hub")} />
-        <CalendarView onRequestComplete={(tasks) => setCompletionDialogTasks(tasks)} />
-      </PageShell>
-      {completionDialogTasks && (
-        <TaskCompletionDialog
-          tasks={completionDialogTasks}
-          users={appData.users}
-          currentUserId={currentUserId}
-          onConfirm={handleBulkComplete}
-          onCancel={() => { setCompletionDialogTasks(null); }}
-        />
+      {/* ── Task Completion Dialog (overlay, shown for non-calendar views) ── */}
+      {completionDialogTasks && view !== "calendar" && (
+        <TaskCompletionDialog tasks={completionDialogTasks} users={appData.users}
+          currentUserId={currentUserId} onConfirm={handleBulkComplete}
+          onCancel={() => setCompletionDialogTasks(null)} />
       )}
-      </>
-    );
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // RECOGNITION VIEW
-  // ════════════════════════════════════════════════════════════════
-  // Phase 7.1: RecognitionView now uses context — removed appData/setAppData/currentUser props
-  if (view === "recognition" || view === "sendRecognition") {
-    return (<RecognitionView
-      showToast={showToast} sendNotification={sendNotification} onBack={() => setView("hub")} />);
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // SEND RECOGNITION FLOW
-  // ════════════════════════════════════════════════════════════════
-  // sendRecognition handled by RecognitionView
-
-// ════════════════════════════════════════════════════════════════
-  // SETTINGS VIEW
-  // ════════════════════════════════════════════════════════════════
-  // Phase 7.1: SettingsView now uses context — removed appData/setAppData/currentUser props
-  if (view === "settings") {
-    return (<SettingsView
-      showToast={showToast} onBack={() => setView("hub")} />);
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // NOTIFICATIONS VIEW
-  // ════════════════════════════════════════════════════════════════
-  // Phase 7.1: NotificationsView now uses context — removed appData/setAppData/currentUser props
-  if (view === "notifications") {
-    return (<NotificationsView
-      showToast={showToast} sendNotification={sendNotification}
-      sendDirectNotification={sendDirectNotification} onBack={() => setView("hub")} />);
-  }
-
-  return null;
+    </>
+  );
 }

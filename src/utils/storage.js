@@ -22,6 +22,8 @@ export const defaultData = () => ({
   rewards: [],
   redemptions: [],
   notifications: [],
+  aiPosts: [],             // Divvy AI scheduled posts (morning, recap, balance)
+  feedMessages: [],          // User messages on the household feed
   pendingInvites: [],      // NEW: tracks email invitations
   currentUserId: null,
 });
@@ -46,6 +48,10 @@ export async function loadData() {
 
     // Ensure pendingInvites array exists (for existing households)
     if (!appData.pendingInvites) appData.pendingInvites = [];
+    // Ensure aiPosts array exists (for existing households)
+    if (!appData.aiPosts) appData.aiPosts = [];
+    // Ensure feedMessages array exists (for existing households)
+    if (!appData.feedMessages) appData.feedMessages = [];
 
     // Each device tracks its own user locally
     const localUserId = localStorage.getItem('divvy-current-user');

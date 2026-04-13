@@ -17,7 +17,7 @@ import PageShell from "../components/PageShell";
 import Card from "../components/Card";
 import Logo from "../components/Logo";
 
-export default function WelcomeScreen({ onSignUp, onSignIn }) {
+export default function WelcomeScreen({ onSignUp, onSignIn, onDevBypass }) {
   return (
     <PageShell narrow>
       <div style={{ textAlign: "center", marginBottom: 52, marginTop: 80 }}>
@@ -46,6 +46,21 @@ export default function WelcomeScreen({ onSignUp, onSignIn }) {
           Sign in
         </button>
       </Card>
+
+      {/* DEV ONLY — bypass sign-in to view existing household */}
+      {onDevBypass && (
+        <div style={{ textAlign: "center", marginTop: 28, animation: "fadeUp 0.6s ease 0.3s both" }}>
+          <button onClick={onDevBypass} style={{
+            all: "unset", cursor: "pointer",
+            padding: "10px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+            color: C.danger, border: `2px dashed rgba(192,57,43,0.3)`,
+            background: "rgba(192,57,43,0.03)",
+            fontFamily: "'Outfit', sans-serif",
+          }}>
+            Dev: Skip sign-in &rarr;
+          </button>
+        </div>
+      )}
     </PageShell>
   );
 }
